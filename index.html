@@ -120,7 +120,9 @@ const firebaseConfig = {
 // Must match the emails in firestore.rules. Only these accounts can open the record.
 const ALLOWED_EMAILS = [
   "avinashmnavalgund87@gmail.com",
-  "aniludupi@gmail.com"
+  "aniludupi@gmail.com",
+  "dinashetty1@gmail.com",
+  "pradeephosanagar@gmail.com"
 ];
 
 const CATEGORIES = [
@@ -427,6 +429,7 @@ function entriesView() {
     <div class="card">
       <div class="toolbar">
         ${q ? "" : `<label>Period<select id="period">${periodOptions().map(m => `<option value="${m}" ${m === p ? "selected" : ""}>${m === "undated" ? "Undated" : monthLabel(m)}</option>`).join("")}</select></label>`}
+        <button class="btn" id="csvBtn" type="button">Download CSV</button>
         <label style="flex:1;min-width:160px">Search<input type="search" id="search" placeholder="Category, payee, note" value="${esc(filterText)}"></label>
       </div>
       <div class="tablewrap">
@@ -441,6 +444,20 @@ function entriesView() {
         </table>` : '<p class="empty">No entries match.</p>'}
       </div>
     </div>`;
+}
+
+function toCsv() {
+  const rows = [["Date", "Category", "Paid to/by", "Amount (INR)", "Note"]];
+  entries.slice().sort(byDateDesc).forEach(e => rows.push([e.date, e.category, e.payee, e.amount ?? "", e.note]));
+  return rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+}
+function downloadCsv() {
+  const blob = new Blob(["\uFEFF" + toCsv()], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "aditya-harmony-expenses.csv";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
 function render() {
@@ -491,6 +508,7 @@ function bind() {
     if (ok) { editingId = null; render(); }
   });
 
+  document.getElementById("csvBtn")?.addEventListener("click", downloadCsv);
   const cancel = document.getElementById("cancel");
   if (cancel) cancel.addEventListener("click", () => { editingId = null; setMsg(""); render(); });
 
