@@ -152,6 +152,7 @@ let view = "home";
 let period = null;
 let editingId = null;
 let filterText = "";
+let lastRows = [];
 const canWrite = true; // the security rules decide who can actually write
 
 const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -505,11 +506,20 @@ function statementView() {
     prev = closing;
     return { m, b, opening, nb, other, credits, debits, closing };
   });
+  lastRows = rows;
   const imported = ["2026-07", "2026-08", "2026-09"].some(m => bank[m]);
   const withCash = rows.filter(r => r.b && (r.b.cashIn != null || r.b.cashOut != null));
   const detail = entries.filter(e => mkey(e)).slice().sort((a, b) => mkey(a).localeCompare(mkey(b)) || a.category.localeCompare(b.category));
 
   return `
+    <div class="card" style="margin-bottom:16px">
+      <h2>Download a month</h2>
+      <div class="toolbar" style="margin-bottom:0">
+        <label>Month<select id="csvMonth">${ms.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("")}</select></label>
+        <button class="btn primary" id="monthCsv" type="button">Download CSV</button>
+      </div>
+      <p class="hint">Includes that month's statement, cash and every expense entry.</p>
+    </div>
     <div class="card">
       <h2>Monthly statement</h2>
       <div class="tablewrap"><table>
@@ -559,6 +569,41 @@ async function importHistory() {
     await batch.commit();
     setMsg("July–September loaded.");
   } catch (e) { setMsg(writeErr(e), true); }
+}
+
+function saveText(name, text, type = "text/csv") {
+  const blob = new Blob(["\uFEFF" + text], { type: type + ";charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+}
+function monthCsv(m) {
+  const r = lastRows.find(x => x.m === m);
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const row = arr => arr.map(q).join(",");
+  const num = v => v == null ? "TBC" : v;
+  const lines = [
+    row(["Month", monthLabel(m)]),
+    "",
+    row(["Statement", "Amount (INR)"]),
+    row(["Opening balance", num(r?.opening)]),
+    row(["NoBroker collections", num(r?.nb)]),
+    row(["Other bank credits", num(r?.other)]),
+    row(["Total credits", num(r?.credits)]),
+    row(["Expenditure (debits)", r ? r.debits : 0]),
+    row(["Closing balance", num(r?.closing)]),
+    "",
+    row(["Cash in", num(r?.b?.cashIn)]),
+    row(["Cash paid out", num(r?.b?.cashOut)]),
+    "",
+    row(["Date", "Category", "Paid to / by", "Note", "Amount (INR)"])
+  ];
+  entries.filter(e => mkey(e) === m)
+    .sort((a, b) => a.category.localeCompare(b.category))
+    .forEach(e => lines.push(row([e.date, e.category, e.payee, e.note, e.amount ?? "Pending"])));
+  saveText(`aditya-harmony-${m}.csv`, lines.join("\r\n"));
 }
 
 function render() {
@@ -611,6 +656,7 @@ function bind() {
 
   document.getElementById("csvBtn")?.addEventListener("click", downloadCsv);
   document.getElementById("importHist")?.addEventListener("click", importHistory);
+  document.getElementById("monthCsv")?.addEventListener("click", () => monthCsv(document.getElementById("csvMonth").value));
   const cancel = document.getElementById("cancel");
   if (cancel) cancel.addEventListener("click", () => { editingId = null; setMsg(""); render(); });
 
