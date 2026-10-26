@@ -94,6 +94,7 @@ td .note { color: var(--muted); font-size: 13px; }
     <nav class="tabs" role="tablist" hidden>
       <button role="tab" id="t-home" aria-selected="true" data-view="home">Home</button>
       <button role="tab" id="t-entries" aria-selected="false" data-view="entries">Daily entries</button>
+      <button role="tab" id="t-statement" aria-selected="false" data-view="statement">Statement</button>
       <button class="btn small" id="signout" type="button" hidden>Sign out</button>
     </nav>
   </header>
@@ -106,7 +107,7 @@ import {
   getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider,
   signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDSLSgonSDEchLKGebkGKyB6V7XUEXNR_s",
@@ -165,20 +166,41 @@ const sum = list => list.reduce((s, e) => s + Number(e.amount || 0), 0);
 const amountCell = e => e.amount == null ? '<span class="pending">Pending</span>' : inr(e.amount);
 const colorOf = i => `var(${COLORS[i % COLORS.length]})`;
 const who = e => [e.payee, e.note].filter(Boolean).join(" · ");
+const mkey = e => e.month || monthKey(e.date);
+
+// Opening balances and bank figures from the July–September spreadsheet.
+const BANK_IMPORT = {
+  "2026-07": { opening: 439512.93, nobroker: 466592, other: 23180, flats: 48, nbTxns: 49, cashIn: 21000, cashOut: 0 },
+  "2026-08": { opening: null, nobroker: 98158, other: 0, flats: 41, nbTxns: 43, cashIn: 174000, cashOut: 120993 },
+  "2026-09": { opening: null, nobroker: 32252, other: 4992, flats: 14, nbTxns: 15, cashIn: 500, cashOut: 48500 }
+};
+const HISTORY_ENTRIES = [
+  { id: "h07-1", month: "2026-07", category: "Other", payee: "Shaila SRC", note: "", amount: 62766 },
+  { id: "h07-2", month: "2026-07", category: "Electricity", payee: "Narsimha Raju", note: "Paid to BESCOM", amount: 22001 },
+  { id: "h07-3", month: "2026-07", category: "Other", payee: "Vakil Garden City Owners", note: "", amount: 10920 },
+  { id: "h07-4", month: "2026-07", category: "Water Consumption Charges", payee: "Gowrish", note: "AL Tanker for June", amount: 21483 },
+  { id: "h07-5", month: "2026-07", category: "Other", payee: "VGC", note: "Concrete work", amount: 3000 },
+  { id: "h07-6", month: "2026-07", category: "Salaries", payee: "Ganesh", note: "", amount: 25000 },
+  { id: "h08-1", month: "2026-08", category: "Other", payee: "Shaila SRC", note: "", amount: 62766 },
+  { id: "h08-2", month: "2026-08", category: "Other", payee: "", note: "Cash withdrawal for payments", amount: 150000 },
+  { id: "h09-1", month: "2026-09", category: "Other", payee: "Shaila SRC", note: "", amount: 62766 },
+  { id: "h09-2", month: "2026-09", category: "Water Consumption Charges", payee: "Gowrish", note: "Water tanker", amount: 48515.9 },
+  { id: "h09-3", month: "2026-09", category: "Other", payee: "", note: "Earthing pit", amount: 82542 }
+];
 
 function months() {
-  const set = new Set(entries.filter(e => e.date).map(e => monthKey(e.date)));
+  const set = new Set(entries.filter(e => mkey(e)).map(mkey));
   set.add(monthKey(today()));
   return [...set].sort();
 }
-function hasUndated() { return entries.some(e => !e.date); }
+function hasUndated() { return entries.some(e => !mkey(e)); }
 function periodOptions() { return hasUndated() ? [...months(), "undated"] : months(); }
 function currentPeriod() {
   const o = periodOptions();
   if (!o.includes(period)) period = o.includes(monthKey(today())) ? monthKey(today()) : o[o.length - 1];
   return period;
 }
-function inPeriod(e, p) { return p === "undated" ? !e.date : monthKey(e.date) === p; }
+function inPeriod(e, p) { return p === "undated" ? !mkey(e) : mkey(e) === p; }
 function splitByCategory(list) {
   const t = {};
   list.forEach(e => { t[e.category] = (t[e.category] || 0) + Number(e.amount || 0); });
@@ -293,7 +315,7 @@ function bankCard(p) {
   const num = v => (v == null || v === "" ? "" : v);
   const opening = Number(b.opening || 0), nobroker = Number(b.nobroker || 0), other = Number(b.other || 0);
   const credits = nobroker + other;
-  const spent = sum(entries.filter(e => monthKey(e.date) === p));
+  const spent = sum(entries.filter(e => mkey(e) === p));
   const closing = opening + credits - spent;
   const rows = [
     ["Opening Balance", inr(opening)],
@@ -314,6 +336,8 @@ function bankCard(p) {
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
         <label class="field">Unique flats paying via NoBroker<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
         <label class="field">NoBroker transactions<input type="number" name="nbTxns" min="0" step="1" value="${esc(num(b.nbTxns))}"></label>
+        <label class="field">Cash in (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
+        <label class="field">Cash paid out (₹)<input type="number" name="cashOut" min="0" step="1" value="${esc(num(b.cashOut))}"></label>
         <div><button class="btn primary" type="submit">Save bank figures</button></div>
       </form>` : ""}
       <div style="margin-top:14px">
@@ -323,10 +347,18 @@ function bankCard(p) {
     </div>`;
 }
 
+function periodBar(p) {
+  return `<div class="card" style="margin-bottom:16px">
+    <div class="toolbar" style="margin-bottom:0"><label style="flex:1;max-width:320px">Choose month
+      <select id="period">${periodOptions().map(m => `<option value="${m}" ${m === p ? "selected" : ""}>${m === "undated" ? "Undated" : monthLabel(m)}</option>`).join("")}</select>
+    </label></div>
+  </div>`;
+}
+
 function homeView() {
   const p = currentPeriod();
   const now = today();
-  const thisMonth = entries.filter(e => monthKey(e.date) === monthKey(now));
+  const thisMonth = entries.filter(e => mkey(e) === monthKey(now));
   const ytd = entries.filter(e => (e.date || "").slice(0, 4) === now.slice(0, 4));
   const shown = entries.filter(e => inPeriod(e, p));
   const split = splitByCategory(shown);
@@ -343,9 +375,10 @@ function homeView() {
   const donut = stops.length ? `conic-gradient(${stops.join(",")})` : "conic-gradient(var(--line) 0 100%)";
 
   const mList = months().slice(-6);
-  const trendMax = Math.max(1, ...mList.map(m => sum(entries.filter(e => monthKey(e.date) === m))));
+  const trendMax = Math.max(1, ...mList.map(m => sum(entries.filter(e => mkey(e) === m))));
 
   return `
+    ${periodBar(p)}
     ${bankCard(p)}
     <div class="kpis">
       <div class="kpi"><div class="label">Spent this month</div><div class="value">${inr(sum(thisMonth))}</div><div class="sub">${monthLabel(monthKey(now))}</div></div>
@@ -354,11 +387,6 @@ function homeView() {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <div class="toolbar" style="margin-bottom:16px">
-        <label>Period
-          <select id="period">${periodOptions().map(m => `<option value="${m}" ${m === p ? "selected" : ""}>${m === "undated" ? "Undated" : monthLabel(m)}</option>`).join("")}</select>
-        </label>
-      </div>
       <h2>Split by category: ${p === "undated" ? "undated entries" : monthLabel(p)}</h2>
       ${split.length ? `
       <div class="split">
@@ -384,7 +412,7 @@ function homeView() {
         <h2>Last six months</h2>
         <div class="bars">
           ${mList.map(m => {
-            const t = sum(entries.filter(e => monthKey(e.date) === m));
+            const t = sum(entries.filter(e => mkey(e) === m));
             return `<div class="col ${m === monthKey(now) ? "current" : ""}"><span class="val">${inr(t)}</span><div class="fill" style="height:${(t / trendMax) * 80}%"></div><span class="lbl">${monthShort(m)}</span></div>`;
           }).join("")}
         </div>
@@ -460,12 +488,85 @@ function downloadCsv() {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
+
+const fmtOr = v => v == null ? '<span class="pending">TBC</span>' : inr(v);
+
+function statementView() {
+  const ms = [...new Set([...Object.keys(bank), ...entries.map(mkey).filter(Boolean), monthKey(today())])].sort();
+  let prev = null;
+  const rows = ms.map(m => {
+    const b = bank[m];
+    const opening = b && b.opening != null ? Number(b.opening) : prev;
+    const nb = b ? Number(b.nobroker || 0) : null;
+    const other = b ? Number(b.other || 0) : null;
+    const credits = b ? nb + other : null;
+    const debits = sum(entries.filter(e => mkey(e) === m));
+    const closing = b && opening != null ? opening + credits - debits : null;
+    prev = closing;
+    return { m, b, opening, nb, other, credits, debits, closing };
+  });
+  const imported = ["2026-07", "2026-08", "2026-09"].some(m => bank[m]);
+  const withCash = rows.filter(r => r.b && (r.b.cashIn != null || r.b.cashOut != null));
+  const detail = entries.filter(e => mkey(e)).slice().sort((a, b) => mkey(a).localeCompare(mkey(b)) || a.category.localeCompare(b.category));
+
+  return `
+    <div class="card">
+      <h2>Monthly statement</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th style="text-align:right">Opening</th><th style="text-align:right">NoBroker</th><th style="text-align:right">Other credits</th><th style="text-align:right">Total credits</th><th style="text-align:right">Expenditure</th><th style="text-align:right">Closing</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td>${monthLabel(r.m)}</td>
+          <td class="num">${fmtOr(r.opening)}</td>
+          <td class="num">${fmtOr(r.nb)}</td>
+          <td class="num">${fmtOr(r.other)}</td>
+          <td class="num">${fmtOr(r.credits)}</td>
+          <td class="num">${inr(r.debits)}</td>
+          <td class="num">${fmtOr(r.closing)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      <p class="hint">Opening balance carries forward from the previous month's closing. Expenditure is the total of that month's entries. Months marked TBC need their bank figures entered on the Home tab.</p>
+      ${!imported && canWrite ? '<button class="btn primary" id="importHist" type="button" style="margin-top:12px">Load July–September from spreadsheet</button>' : ""}
+    </div>
+
+    <div class="card">
+      <h2>Cash</h2>
+      ${withCash.length ? `<div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th style="text-align:right">Cash in</th><th style="text-align:right">Cash paid out</th></tr></thead>
+        <tbody>${withCash.map(r => `<tr><td>${monthLabel(r.m)}</td><td class="num">${fmtOr(r.b.cashIn)}</td><td class="num">${fmtOr(r.b.cashOut)}</td></tr>`).join("")}</tbody>
+      </table></div>` : '<p class="empty">No cash figures yet.</p>'}
+      <p class="hint">Cash is kept apart from the bank balance. Cash in includes cash withdrawn from the bank.</p>
+    </div>
+
+    <div class="card">
+      <h2>Expenditure by month</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th>Category</th><th>Paid to / note</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${detail.map(e => `<tr>
+          <td>${monthShort(mkey(e))} ${mkey(e).slice(0, 4)}</td>
+          <td>${esc(e.category)}</td>
+          <td>${esc([e.payee, e.note].filter(Boolean).join(" · "))}</td>
+          <td class="num">${amountCell(e)}</td>
+        </tr>`).join("") || '<tr><td colspan="4" class="empty">No expenditure yet.</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+}
+
+async function importHistory() {
+  try {
+    const batch = writeBatch(db);
+    Object.entries(BANK_IMPORT).forEach(([m, b]) => batch.set(doc(db, "bank", m), b));
+    HISTORY_ENTRIES.forEach(({ id, ...rest }) => batch.set(doc(db, "entries", id), rest));
+    await batch.commit();
+    setMsg("July–September loaded.");
+  } catch (e) { setMsg(writeErr(e), true); }
+}
+
 function render() {
   document.querySelectorAll('[role="tab"]').forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   const appEl = document.getElementById("app");
   if (!user) { appEl.innerHTML = loginView(); bindLogin(); return; }
   if (!loaded) { appEl.innerHTML = '<p class="empty">Loading entries…</p>'; return; }
-  appEl.innerHTML = view === "home" ? homeView() : entriesView();
+  appEl.innerHTML = view === "home" ? homeView() : view === "statement" ? statementView() : entriesView();
   bind();
 }
 
@@ -485,7 +586,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), nbTxns: n("nbTxns") }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), nbTxns: n("nbTxns"), cashIn: n("cashIn"), cashOut: n("cashOut") }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
@@ -509,6 +610,7 @@ function bind() {
   });
 
   document.getElementById("csvBtn")?.addEventListener("click", downloadCsv);
+  document.getElementById("importHist")?.addEventListener("click", importHistory);
   const cancel = document.getElementById("cancel");
   if (cancel) cancel.addEventListener("click", () => { editingId = null; setMsg(""); render(); });
 
