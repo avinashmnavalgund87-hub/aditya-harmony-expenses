@@ -131,7 +131,7 @@ const ALLOWED_EMAILS = [
 const CATEGORIES = [
   "Salaries", "Bank transfers",
   "Housekeeping", "Electricity", "Fuel", "TDS", "Waste Management", "Garden Management", "Security",
-  "Quarterly Maintenance Collection", "Water Consumption Charges", "Water Board Maintenance Charges", "AMC",
+  "Quarterly Maintenance Collection", "Water Consumption Charges", "Water Board Maintenance Charges", "BWSSB", "AMC",
   "Electrician - In call", "Plumber - In call", "Water Body Maintenance Supply", "Housekeeping Material In ward", "BBMP", "Purchases", "Other"
 ];
 const PAYEES = [
@@ -159,6 +159,7 @@ let recMonth = null;
 let expMonth = null;
 let tds = [];
 let tdsPay = {};
+let tdsMonthSel = null;
 const canWrite = true; // the security rules decide who can actually write
 
 const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -337,7 +338,7 @@ function bankCard(p) {
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
-    ["Cash Credit to the bank", `${b.flats ?? "—"} flats · ${inr(Number(b.cashMaint || 0))}`]
+    ["Cash Credit to the bank", b.flats ?? "—"]
   ];
   return `
     <div class="card">
@@ -346,8 +347,7 @@ function bankCard(p) {
         <label class="field">Opening balance (₹)<input type="number" name="opening" step="1" value="${esc(num(b.opening))}"></label>
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
-        <label class="field">Cash Credit to the bank: number of flats<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
-        <label class="field">Cash Credit to the bank: amount (₹)<input type="number" name="cashMaint" min="0" step="1" value="${esc(num(b.cashMaint))}"></label>
+        <label class="field">Cash Credit to the bank (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
         <label class="field">Cash in (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash paid out (₹)<input type="number" name="cashOut" min="0" step="1" value="${esc(num(b.cashOut))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
@@ -713,18 +713,21 @@ function parseFds(text) {
 function tdsView() {
   const dedOf = m => tds.filter(r => r.month === m).reduce((s, r) => s + Number(r.tds || 0), 0);
   const months = [...new Set([...tds.map(r => r.month), ...Object.keys(tdsPay), monthKey(today())])].filter(Boolean).sort();
+  const sel = tdsMonthSel && months.includes(tdsMonthSel) ? tdsMonthSel : (months.includes(monthKey(today())) ? monthKey(today()) : months[months.length - 1]);
+  tdsMonthSel = sel;
+  const payRec = tdsPay[sel];
+  const paidOf = m => tdsPay[m] ? Number(tdsPay[m].paid || 0) : 0;
   const lines = tds.slice().sort((a, b) => (a.month || "").localeCompare(b.month || "") || (a.vendor || "").localeCompare(b.vendor || ""));
   return `
     <div class="card" style="margin-bottom:16px">
       <h2>Monthly TDS summary</h2>
-      <div class="tablewrap"><table>
-        <thead><tr><th>Month</th><th style="text-align:right">TDS deducted</th><th style="text-align:right">Paid to Sandesh</th><th style="text-align:right">Difference</th><th>Date paid</th></tr></thead>
-        <tbody>${months.map(m => {
-          const p = tdsPay[m];
-          const paid = p ? Number(p.paid || 0) : 0;
-          return `<tr><td>${monthLabel(m)}</td><td class="num">${inr(dedOf(m))}</td><td class="num">${p ? inr(paid) : '<span class="pending">Not paid</span>'}</td><td class="num">${inr(dedOf(m) - paid)}</td><td>${esc(p?.date || "")}</td></tr>`;
-        }).join("")}</tbody>
-      </table></div>
+      <div class="toolbar" style="margin-bottom:12px"><label style="flex:1;max-width:320px">Choose month
+        <select id="tdsMonth">${months.map(m => `<option value="${m}" ${m === sel ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select>
+      </label></div>
+      <div class="kv"><span>TDS deducted</span><span class="num">${inr(dedOf(sel))}</span></div>
+      <div class="kv"><span>Paid to Sandesh</span><span class="num">${payRec ? inr(Number(payRec.paid || 0)) : '<span class="pending">Not paid</span>'}</span></div>
+      <div class="kv"><span>Difference</span><span class="num">${inr(dedOf(sel) - paidOf(sel))}</span></div>
+      <div class="kv"><span>Date paid</span><span>${esc(payRec?.date || "—")}</span></div>
     </div>
 
     <div class="grid two" style="margin-bottom:16px">
@@ -852,7 +855,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashMaint: n("cashMaint"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
@@ -898,6 +901,8 @@ function bind() {
     await write(setDoc(doc(db, "tds", uid()), rec), "TDS line added.");
     tf.reset();
   });
+  const tm = document.getElementById("tdsMonth");
+  if (tm) tm.addEventListener("change", () => { tdsMonthSel = tm.value; render(); });
   const pf = document.getElementById("payForm");
   if (pf) pf.addEventListener("submit", async ev => {
     ev.preventDefault();
