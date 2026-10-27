@@ -83,6 +83,7 @@ td .note { color: var(--muted); font-size: 13px; }
 .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
 [hidden] { display: none !important; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -594,6 +595,7 @@ function statementView() {
       <div class="toolbar" style="margin-bottom:0">
         <label>Month<select id="csvMonth">${ms.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join("")}</select></label>
         <button class="btn primary" id="monthCsv" type="button">Download CSV</button>
+        <button class="btn" id="monthXlsx" type="button">Download Excel</button>
       </div>
       <p class="hint">Includes that month's statement, cash and every expense entry.</p>
     </div>
@@ -763,6 +765,69 @@ function tdsView() {
     </div>`;
 }
 
+function monthXlsx(m) {
+  if (typeof XLSX === "undefined") { setMsg("The Excel library did not load. Check your connection and reload the page.", true); return; }
+  const b = bank[m] || {};
+  const r = lastRows.find(x => x.m === m);
+  const rowsM = entries.filter(e => mkey(e) === m);
+  const total = rowsM.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const [y, mo] = m.split("-").map(Number);
+  const endLabel = `${new Date(y, mo, 0).getDate()}.${String(mo).padStart(2, "0")}.${y}`;
+  const monthName = monthLabel(m).toUpperCase();
+
+  // summary sheet: A) expenditure, B) reconciliation
+  const summary = [
+    ["ADITYA HARMONY APARTMENT OWNERS WELFARE ASSOCIATION"],
+    [`A) Statement of Expenditures for the month of ${monthName}`],
+    [],
+    ["Sl. No", "Type of payment", "Particulars", "Amount in INR"],
+    ...rowsM.map((e, k) => [k + 1, e.ptype || "Bank", [e.category, e.payee, e.note].filter(Boolean).join(" - "), e.amount ?? "Pending"]),
+    [],
+    ["", "", `Total Expenditures paid (Sl No 1 to Sl No ${rowsM.length})`, total],
+    ["", "", "No of Flats occupied", b.flats ?? ""],
+    [],
+    [`B) Statement Reconciliation of Closing Balance of Cash and bank balance as on ${endLabel}`],
+    ["Sl. No", "Type of payment", "Particulars", "Amount in INR"]
+  ];
+  const recItems = [
+    ["Cash", "Cash In Hand", b.cashHand ?? ""],
+    ["Bank", `Bank Balance as on ${endLabel} - SB Account`, r?.closing ?? ""],
+    ...((b.fds) || []).map(f => ["Bank", `Fixed Deposit - ${f.name}`, Number(f.amount) || 0])
+  ];
+  recItems.forEach((it, k) => summary.push([k + 1, ...it]));
+  const recTotal = recItems.reduce((s, it) => s + (typeof it[2] === "number" ? it[2] : 0), 0);
+  summary.push([], ["", "", `Total available balance as on ${endLabel}`, recTotal]);
+
+  // cash book sheet: the imprest holder's receipts and payments
+  const holder = b.impHolder || "Holder";
+  const recs = b.impRec || [];
+  const pays = b.impPay || [];
+  const sumA = a => a.reduce((s, x) => s + Number(x.amount || 0), 0);
+  let n = 0;
+  const cb = [
+    [holder],
+    [`Cash Receipts and Payment account for the month of ${endLabel}`],
+    [],
+    ["Sl. No", "Date", "Particulars", "Amount", "Amount"],
+    [++n, "", "Opening Balance b/d", "", b.impOpen ?? 0]
+  ];
+  recs.forEach(x => cb.push([++n, x.date, "Received: " + x.particulars, x.amount, ""]));
+  cb.push([], ["", "", "Less: Expenditure paid"]);
+  pays.forEach(x => cb.push([++n, x.date, x.particulars, x.amount, ""]));
+  cb.push([], ["", "", "Total receipts", sumA(recs), ""], ["", "", "Total payments", sumA(pays), ""]);
+  const close = Number(b.impOpen || 0) + sumA(recs) - sumA(pays);
+  cb.push(["", "", `Balance Left with ${holder} as on ${endLabel}`, "", close]);
+
+  const wb = XLSX.utils.book_new();
+  const wsSum = XLSX.utils.aoa_to_sheet(summary);
+  wsSum["!cols"] = [{ wch: 8 }, { wch: 18 }, { wch: 70 }, { wch: 16 }];
+  const wsCb = XLSX.utils.aoa_to_sheet(cb);
+  wsCb["!cols"] = [{ wch: 8 }, { wch: 14 }, { wch: 60 }, { wch: 14 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsSum, "summary");
+  XLSX.utils.book_append_sheet(wb, wsCb, "cash book");
+  XLSX.writeFile(wb, `aditya-harmony-${m}.xlsx`);
+}
+
 function render() {
   document.querySelectorAll('[role="tab"]').forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   const appEl = document.getElementById("app");
@@ -815,6 +880,7 @@ function bind() {
   document.getElementById("csvBtn")?.addEventListener("click", downloadCsv);
   document.getElementById("importHist")?.addEventListener("click", importHistory);
   document.getElementById("monthCsv")?.addEventListener("click", () => monthCsv(document.getElementById("csvMonth").value));
+  document.getElementById("monthXlsx")?.addEventListener("click", () => monthXlsx(document.getElementById("csvMonth").value));
   document.getElementById("recMonth")?.addEventListener("change", e => { recMonth = e.target.value; render(); });
   document.getElementById("expMonth")?.addEventListener("change", e => { expMonth = e.target.value; render(); });
   const tf = document.getElementById("tdsForm");
