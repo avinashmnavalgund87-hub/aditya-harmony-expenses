@@ -95,6 +95,7 @@ td .note { color: var(--muted); font-size: 13px; }
       <button role="tab" id="t-home" aria-selected="true" data-view="home">Home</button>
       <button role="tab" id="t-entries" aria-selected="false" data-view="entries">Daily entries</button>
       <button role="tab" id="t-statement" aria-selected="false" data-view="statement">Statement</button>
+      <button role="tab" id="t-tds" aria-selected="false" data-view="tds">TDS</button>
       <button class="btn small" id="signout" type="button" hidden>Sign out</button>
     </nav>
   </header>
@@ -153,6 +154,10 @@ let period = null;
 let editingId = null;
 let filterText = "";
 let lastRows = [];
+let recMonth = null;
+let expMonth = null;
+let tds = [];
+let tdsPay = {};
 const canWrite = true; // the security rules decide who can actually write
 
 const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -299,6 +304,12 @@ function startData() {
   unsubs.push(onSnapshot(collection(db, "entries"),
     s => { entries = s.docs.map(d => ({ id: d.id, ...d.data() })); loaded = true; render(); },
     err => { loaded = true; setMsg("Could not load entries (" + (err.code || "error") + ").", true); render(); }));
+  unsubs.push(onSnapshot(collection(db, "tds"),
+    s => { tds = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); },
+    () => {}));
+  unsubs.push(onSnapshot(collection(db, "tdsPay"),
+    s => { const t = {}; s.docs.forEach(d => { t[d.id] = d.data(); }); tdsPay = t; render(); },
+    () => {}));
   unsubs.push(onSnapshot(collection(db, "bank"),
     s => { const b = {}; s.docs.forEach(d => { b[d.id] = d.data(); }); bank = b; render(); },
     () => {}));
@@ -339,6 +350,12 @@ function bankCard(p) {
         <label class="field">NoBroker transactions<input type="number" name="nbTxns" min="0" step="1" value="${esc(num(b.nbTxns))}"></label>
         <label class="field">Cash in (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash paid out (₹)<input type="number" name="cashOut" min="0" step="1" value="${esc(num(b.cashOut))}"></label>
+        <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
+        <label class="field" style="grid-column:1/-1">Fixed deposits (one per line: name, amount)<textarea name="fds" rows="3">${esc((b.fds || []).map(f => `${f.name}, ${f.amount}`).join("\n"))}</textarea></label>
+        <label class="field">Imprest holder<input type="text" name="impHolder" maxlength="60" value="${esc(b.impHolder || "")}"></label>
+        <label class="field">Imprest opening cash (₹)<input type="number" name="impOpen" min="0" step="1" value="${esc(num(b.impOpen))}"></label>
+        <label class="field" style="grid-column:1/-1">Imprest received (one per line: date, particulars, amount)<textarea name="impRec" rows="3">${esc((b.impRec || []).map(x => `${x.date}, ${x.particulars}, ${x.amount}`).join("\n"))}</textarea></label>
+        <label class="field" style="grid-column:1/-1">Imprest paid (one per line: date, particulars, amount)<textarea name="impPay" rows="6">${esc((b.impPay || []).map(x => `${x.date}, ${x.particulars}, ${x.amount}`).join("\n"))}</textarea></label>
         <div><button class="btn primary" type="submit">Save bank figures</button></div>
       </form>` : ""}
       <div style="margin-top:14px">
@@ -446,6 +463,7 @@ function entriesView() {
         <label class="field">Paid to / by<input type="text" name="payee" list="payees" maxlength="80" value="${esc(e0?.payee || "")}"><datalist id="payees">${PAYEES.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
         <label class="field">Amount (₹)<input type="number" name="amount" min="0" step="1" placeholder="Blank if pending" value="${esc(e0?.amount ?? "")}"></label>
         <label class="field">Note<input type="text" name="note" maxlength="120" value="${esc(e0?.note || "")}"></label>
+        <label class="field">Payment type<select name="ptype"><option ${e0?.ptype !== "Cash" ? "selected" : ""}>Bank</option><option ${e0?.ptype === "Cash" ? "selected" : ""}>Cash</option></select></label>
         <div class="actions">
           <button class="btn primary" type="submit">${e0 ? "Save changes" : "Add entry"}</button>
           ${e0 ? '<button class="btn" type="button" id="cancel">Cancel</button>' : ""}
@@ -511,6 +529,65 @@ function statementView() {
   const withCash = rows.filter(r => r.b && (r.b.cashIn != null || r.b.cashOut != null));
   const detail = entries.filter(e => mkey(e)).slice().sort((a, b) => mkey(a).localeCompare(mkey(b)) || a.category.localeCompare(b.category));
 
+  const recM = ms.includes(recMonth) ? recMonth : ms[ms.length - 1];
+  const rr = rows.find(r => r.m === recM);
+  const [ry, rmo] = recM.split("-").map(Number);
+  const endLabel = `${new Date(ry, rmo, 0).getDate()}.${String(rmo).padStart(2, "0")}.${ry}`;
+  const recItems = [
+    ["Cash", "Cash In Hand", rr?.b?.cashHand ?? null],
+    ["Bank", `Bank Balance as on ${endLabel} - SB Account`, rr?.closing ?? null],
+    ...((rr?.b?.fds) || []).map(f => ["Bank", `Fixed Deposit - ${f.name}`, Number(f.amount) || 0])
+  ];
+  const recTotal = recItems.reduce((s, i) => s + (i[2] == null ? 0 : Number(i[2])), 0);
+  const ib = bank[recM] || {};
+  const impRec = ib.impRec || [];
+  const impPay = ib.impPay || [];
+  const sumA = a => a.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const impClose = ib.impOpen != null ? Number(ib.impOpen) + sumA(impRec) - sumA(impPay) : null;
+  const impCard = `
+    <div class="card" style="margin-bottom:16px">
+      <h2>Imprest account${ib.impHolder ? ": " + esc(ib.impHolder) : ""}</h2>
+      <p class="hint" style="margin-top:0">${monthLabel(recM)}. Received adds to the balance; paid reduces it.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Date</th><th>Particulars</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          <tr><td></td><td><strong>Opening balance (cash withdrawn)</strong></td><td class="num">${fmtOr(ib.impOpen ?? null)}</td></tr>
+          ${impRec.map(x => `<tr><td>${esc(x.date)}</td><td>Received: ${esc(x.particulars)}</td><td class="num">${inr(x.amount)}</td></tr>`).join("")}
+          ${impPay.map(x => `<tr><td>${esc(x.date)}</td><td>Paid: ${esc(x.particulars)}</td><td class="num">${inr(x.amount)}</td></tr>`).join("")}
+          <tr><td></td><td><strong>Balance left with ${esc(ib.impHolder || "holder")} as on ${endLabel}</strong></td><td class="num"><strong>${fmtOr(impClose)}</strong></td></tr>
+        </tbody>
+      </table></div>
+    </div>`;
+  const emM = ms.includes(expMonth) ? expMonth : ms[ms.length - 1];
+  const emEntries = entries.filter(e => mkey(e) === emM);
+  const emTotal = sum(emEntries);
+  const emFlats = bank[emM]?.flats;
+  const expCard = `
+    <div class="card" style="margin-bottom:16px">
+      <h2>Statement of expenditures</h2>
+      <div class="toolbar"><label>Month<select id="expMonth">${ms.map(m => `<option value="${m}" ${m === emM ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></label></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Sl. No</th><th>Type of payment</th><th>Particulars</th><th style="text-align:right">Amount in INR</th></tr></thead>
+        <tbody>${emEntries.map((e, k) => `<tr><td>${k + 1}</td><td>${esc(e.ptype || "Bank")}</td><td>${esc([e.category, e.payee, e.note].filter(Boolean).join(" - "))}</td><td class="num">${amountCell(e)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">No expenditure this month.</td></tr>'}
+          <tr><td></td><td></td><td><strong>Total expenditures paid</strong></td><td class="num"><strong>${inr(emTotal)}</strong></td></tr>
+          <tr><td></td><td></td><td>No of flats occupied</td><td class="num">${emFlats ?? "TBC"}</td></tr>
+        </tbody>
+      </table></div>
+      <p class="hint">Entries recorded before payment type was added show as Bank.</p>
+    </div>`;
+  const recCard = `
+    <div class="card" style="margin-bottom:16px">
+      <h2>Reconciliation of closing balance</h2>
+      <div class="toolbar"><label>Month<select id="recMonth">${ms.map(m => `<option value="${m}" ${m === recM ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></label></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Sl. No</th><th>Type of payment</th><th>Particulars</th><th style="text-align:right">Amount in INR</th></tr></thead>
+        <tbody>${recItems.map((i, k) => `<tr><td>${k + 1}</td><td>${i[0]}</td><td>${esc(i[1])}</td><td class="num">${fmtOr(i[2])}</td></tr>`).join("")}
+          <tr><td></td><td></td><td><strong>Total available balance as on ${endLabel}</strong></td><td class="num"><strong>${inr(recTotal)}</strong></td></tr>
+        </tbody>
+      </table></div>
+      <p class="hint">Cash in hand and fixed deposits are entered on the Home tab.</p>
+    </div>`;
+
   return `
     <div class="card" style="margin-bottom:16px">
       <h2>Download a month</h2>
@@ -538,6 +615,8 @@ function statementView() {
       ${!imported && canWrite ? '<button class="btn primary" id="importHist" type="button" style="margin-top:12px">Load July–September from spreadsheet</button>' : ""}
     </div>
 
+    ${recCard}
+    ${impCard}
     <div class="card">
       <h2>Cash</h2>
       ${withCash.length ? `<div class="tablewrap"><table>
@@ -547,6 +626,7 @@ function statementView() {
       <p class="hint">Cash is kept apart from the bank balance. Cash in includes cash withdrawn from the bank.</p>
     </div>
 
+    ${expCard}
     <div class="card">
       <h2>Expenditure by month</h2>
       <div class="tablewrap"><table>
@@ -596,6 +676,12 @@ function monthCsv(m) {
     row(["Closing balance", num(r?.closing)]),
     "",
     row(["Cash in", num(r?.b?.cashIn)]),
+    row(["Cash in hand (month end)", num(r?.b?.cashHand)]),
+    row(["Imprest holder", r?.b?.impHolder || ""]),
+    row(["Imprest opening cash", num(r?.b?.impOpen)]),
+    ...((r?.b?.impRec) || []).map(x => row(["Imprest received - " + x.particulars, x.amount])),
+    ...((r?.b?.impPay) || []).map(x => row(["Imprest paid - " + x.particulars, x.amount])),
+    ...((r?.b?.fds) || []).map(f => row(["Fixed deposit - " + f.name, f.amount])),
     row(["Cash paid out", num(r?.b?.cashOut)]),
     "",
     row(["Date", "Category", "Paid to / by", "Note", "Amount (INR)"])
@@ -606,12 +692,83 @@ function monthCsv(m) {
   saveText(`aditya-harmony-${m}.csv`, lines.join("\r\n"));
 }
 
+function parseImp(text) {
+  return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const p = l.split(",").map(x => x.trim());
+    const amount = Number(p[p.length - 1].replace(/[^0-9.\-]/g, "")) || 0;
+    if (p.length < 3) return { date: "", particulars: p.slice(0, -1).join(", "), amount };
+    return { date: p[0], particulars: p.slice(1, -1).join(", "), amount };
+  });
+}
+
+function parseFds(text) {
+  return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.lastIndexOf(",");
+    if (i < 0) return { name: l, amount: 0 };
+    return { name: l.slice(0, i).trim(), amount: Number(l.slice(i + 1).replace(/[^0-9.\-]/g, "")) || 0 };
+  });
+}
+
+function tdsView() {
+  const dedOf = m => tds.filter(r => r.month === m).reduce((s, r) => s + Number(r.tds || 0), 0);
+  const months = [...new Set([...tds.map(r => r.month), ...Object.keys(tdsPay), monthKey(today())])].filter(Boolean).sort();
+  const lines = tds.slice().sort((a, b) => (a.month || "").localeCompare(b.month || "") || (a.vendor || "").localeCompare(b.vendor || ""));
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <h2>Monthly TDS summary</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th style="text-align:right">TDS deducted</th><th style="text-align:right">Paid to Sandesh</th><th style="text-align:right">Difference</th><th>Date paid</th></tr></thead>
+        <tbody>${months.map(m => {
+          const p = tdsPay[m];
+          const paid = p ? Number(p.paid || 0) : 0;
+          return `<tr><td>${monthLabel(m)}</td><td class="num">${inr(dedOf(m))}</td><td class="num">${p ? inr(paid) : '<span class="pending">Not paid</span>'}</td><td class="num">${inr(dedOf(m) - paid)}</td><td>${esc(p?.date || "")}</td></tr>`;
+        }).join("")}</tbody>
+      </table></div>
+    </div>
+
+    <div class="grid two" style="margin-bottom:16px">
+      <div class="card">
+        <h2>Add TDS deduction</h2>
+        <form id="tdsForm" class="entry-form">
+          <label class="field">Month<input type="month" name="month" value="${monthKey(today())}" required></label>
+          <label class="field">Vendor<input type="text" name="vendor" maxlength="80" required></label>
+          <label class="field">PAN<input type="text" name="pan" maxlength="12"></label>
+          <label class="field">Section<input type="text" name="section" placeholder="194C" maxlength="10"></label>
+          <label class="field">Gross amount (₹)<input type="number" name="gross" min="0" step="1" required></label>
+          <label class="field">TDS deducted (₹)<input type="number" name="tds" min="0" step="1" required></label>
+          <div><button class="btn primary" type="submit">Add</button></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Record TDS paid to Sandesh</h2>
+        <form id="payForm" class="entry-form">
+          <label class="field">Month<input type="month" name="month" value="${monthKey(today())}" required></label>
+          <label class="field">Amount paid (₹)<input type="number" name="paid" min="0" step="1" required></label>
+          <label class="field">Date paid<input type="date" name="date"></label>
+          <div><button class="btn primary" type="submit">Save</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>TDS by vendor</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th>Vendor</th><th>PAN</th><th>Section</th><th style="text-align:right">Gross</th><th style="text-align:right">TDS</th><th style="text-align:right">Net payment</th><th></th></tr></thead>
+        <tbody>${lines.map(r => `<tr>
+          <td>${monthLabel(r.month)}</td><td>${esc(r.vendor)}</td><td>${esc(r.pan || "")}</td><td>${esc(r.section || "")}</td>
+          <td class="num">${inr(r.gross)}</td><td class="num">${inr(r.tds)}</td><td class="num">${inr(Number(r.gross || 0) - Number(r.tds || 0))}</td>
+          <td><button class="btn small danger" data-tdel="${r.id}">Delete</button></td>
+        </tr>`).join("") || '<tr><td colspan="8" class="empty">No TDS lines yet.</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+}
+
 function render() {
   document.querySelectorAll('[role="tab"]').forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   const appEl = document.getElementById("app");
   if (!user) { appEl.innerHTML = loginView(); bindLogin(); return; }
   if (!loaded) { appEl.innerHTML = '<p class="empty">Loading entries…</p>'; return; }
-  appEl.innerHTML = view === "home" ? homeView() : view === "statement" ? statementView() : entriesView();
+  appEl.innerHTML = view === "home" ? homeView() : view === "statement" ? statementView() : view === "tds" ? tdsView() : entriesView();
   bind();
 }
 
@@ -631,7 +788,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), nbTxns: n("nbTxns"), cashIn: n("cashIn"), cashOut: n("cashOut") }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), nbTxns: n("nbTxns"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
@@ -647,7 +804,8 @@ function bind() {
       category: String(f.get("category")),
       payee: String(f.get("payee") || "").trim(),
       amount,
-      note: String(f.get("note") || "").trim()
+      note: String(f.get("note") || "").trim(),
+      ptype: String(f.get("ptype") || "Bank")
     };
     const id = editingId || uid();
     const ok = await write(setDoc(doc(db, "entries", id), entry), wasEditing ? "Entry updated." : "Entry added.");
@@ -657,6 +815,41 @@ function bind() {
   document.getElementById("csvBtn")?.addEventListener("click", downloadCsv);
   document.getElementById("importHist")?.addEventListener("click", importHistory);
   document.getElementById("monthCsv")?.addEventListener("click", () => monthCsv(document.getElementById("csvMonth").value));
+  document.getElementById("recMonth")?.addEventListener("change", e => { recMonth = e.target.value; render(); });
+  document.getElementById("expMonth")?.addEventListener("change", e => { expMonth = e.target.value; render(); });
+  const tf = document.getElementById("tdsForm");
+  if (tf) tf.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(tf);
+    const rec = {
+      month: String(f.get("month")),
+      vendor: String(f.get("vendor") || "").trim(),
+      pan: String(f.get("pan") || "").trim(),
+      section: String(f.get("section") || "").trim(),
+      gross: Number(f.get("gross")),
+      tds: Number(f.get("tds"))
+    };
+    if (!(rec.gross >= 0) || !(rec.tds >= 0)) { setMsg("Enter valid amounts.", true); return; }
+    await write(setDoc(doc(db, "tds", uid()), rec), "TDS line added.");
+    tf.reset();
+  });
+  const pf = document.getElementById("payForm");
+  if (pf) pf.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(pf);
+    const m = String(f.get("month"));
+    const paid = Number(f.get("paid"));
+    if (!(paid >= 0)) { setMsg("Enter a valid amount.", true); return; }
+    await write(setDoc(doc(db, "tdsPay", m), { paid, date: String(f.get("date") || "") }), "TDS payment saved.");
+  });
+  document.querySelectorAll("[data-tdel]").forEach(b => b.addEventListener("click", async () => {
+    if (b.dataset.armed !== "1") {
+      b.dataset.armed = "1"; b.textContent = "Confirm";
+      setTimeout(() => { if (b.isConnected) { b.dataset.armed = ""; b.textContent = "Delete"; } }, 4000);
+      return;
+    }
+    await write(deleteDoc(doc(db, "tds", b.dataset.tdel)), "TDS line deleted.");
+  }));
   const cancel = document.getElementById("cancel");
   if (cancel) cancel.addEventListener("click", () => { editingId = null; setMsg(""); render(); });
 
