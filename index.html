@@ -337,8 +337,7 @@ function bankCard(p) {
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
-    ["Unique flats paying through NoBroker", b.flats ?? "—"],
-    ["NoBroker transactions", b.nbTxns ?? "—"]
+    ["Cash Credit to the bank", `${b.flats ?? "—"} flats · ${inr(Number(b.cashMaint || 0))}`]
   ];
   return `
     <div class="card">
@@ -347,8 +346,8 @@ function bankCard(p) {
         <label class="field">Opening balance (₹)<input type="number" name="opening" step="1" value="${esc(num(b.opening))}"></label>
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
-        <label class="field">Unique flats paying via NoBroker<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
-        <label class="field">NoBroker transactions<input type="number" name="nbTxns" min="0" step="1" value="${esc(num(b.nbTxns))}"></label>
+        <label class="field">Cash Credit to the bank: number of flats<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
+        <label class="field">Cash Credit to the bank: amount (₹)<input type="number" name="cashMaint" min="0" step="1" value="${esc(num(b.cashMaint))}"></label>
         <label class="field">Cash in (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash paid out (₹)<input type="number" name="cashOut" min="0" step="1" value="${esc(num(b.cashOut))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
@@ -853,7 +852,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), nbTxns: n("nbTxns"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashMaint: n("cashMaint"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
