@@ -712,7 +712,13 @@ function parseFds(text) {
 
 function tdsView() {
   const dedOf = m => tds.filter(r => r.month === m).reduce((s, r) => s + Number(r.tds || 0), 0);
-  const months = [...new Set([...tds.map(r => r.month), ...Object.keys(tdsPay), monthKey(today())])].filter(Boolean).sort();
+  const nowKey = monthKey(today());
+  const span = [];
+  for (let y = 2026, mo = 7; `${y}-${String(mo).padStart(2, "0")}` <= nowKey; mo++) {
+    if (mo > 12) { mo = 1; y++; }
+    span.push(`${y}-${String(mo).padStart(2, "0")}`);
+  }
+  const months = [...new Set([...span, ...tds.map(r => r.month), ...Object.keys(tdsPay), nowKey])].filter(Boolean).sort();
   const sel = tdsMonthSel && months.includes(tdsMonthSel) ? tdsMonthSel : (months.includes(monthKey(today())) ? monthKey(today()) : months[months.length - 1]);
   tdsMonthSel = sel;
   const payRec = tdsPay[sel];
