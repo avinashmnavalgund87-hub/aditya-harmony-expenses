@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aditya Harmony Dashboard</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec; --accent:#2f6fdb; --bad:#c0392b; --good:#1e8e5a; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#14171d; --card:#1d2129; --ink:#e8ebf1; --muted:#9aa3b2; --line:#2c323d; --accent:#6ea8ff; --bad:#ff7b6b; --good:#5fd39a; } }
+  :root[data-theme="dark"] { --bg:#14171d; --card:#1d2129; --ink:#e8ebf1; --muted:#9aa3b2; --line:#2c323d; --accent:#6ea8ff; --bad:#ff7b6b; --good:#5fd39a; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 4px; }
+  h2 { font-size:16px; margin:0 0 10px; }
+  .sub { color:var(--muted); margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .kpi .v { font-size:22px; font-weight:600; }
+  .kpi .l { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:13px; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tablewrap { overflow-x:auto; }
+  select, input { font:inherit; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  button { font:inherit; padding:9px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  .muted { color:var(--muted); }
+  .bad { color:var(--bad); } .good { color:var(--good); }
+  .hidden { display:none; }
+  .bar { height:8px; background:var(--accent); border-radius:4px; }
+</style>
+</head>
+<body>
+<main>
+  <div id="loginBox" class="card hidden" style="max-width:380px;margin:40px auto">
+    <h2>Sign in to view the dashboard</h2>
+    <button id="gbtn" style="width:100%;margin-bottom:10px">Sign in with Google</button>
+    <form id="eform" style="display:grid;gap:8px">
+      <input type="email" name="email" placeholder="Email" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign in with email</button>
+    </form>
+    <p id="loginMsg" class="muted" style="margin-bottom:0"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <h1>Aditya Harmony Apartment Owners Welfare Association</h1>
+    <div class="sub">Live dashboard. Updates automatically when anyone saves an entry, bank figure or TDS line. Read only.</div>
+
+    <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <label>Year <select id="year"></select></label>
+      <label>Month <select id="month"></select></label>
+      <span class="muted" id="who" style="margin-left:auto"></span>
+      <button id="signout" style="background:#6b7280">Sign out</button>
+    </div>
+
+    <div class="grid" id="kpis"></div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <h2 id="mTitle">Bank summary</h2>
+        <div id="bankSummary"></div>
+      </div>
+      <div class="card">
+        <h2>TDS for the month</h2>
+        <div id="tdsSummary"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="catTitle">Expenditure by category</h2>
+      <div class="tablewrap"><table><tbody id="cats"></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2 id="yTitle">Month by month</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Month</th><th class="num">Opening</th><th class="num">Credits</th><th class="num">Expenditure</th><th class="num">Closing</th></tr></thead>
+        <tbody id="months"></tbody>
+      </table></div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// Same project and access list as index.html and firestore.rules.
+const firebaseConfig = {
+  apiKey: "AIzaSyDSLSgonSDEchLKGebkGKyB6V7XUEXNR_s",
+  authDomain: "aditya-harmony.firebaseapp.com",
+  projectId: "aditya-harmony",
+  storageBucket: "aditya-harmony.firebasestorage.app",
+  messagingSenderId: "458520250960",
+  appId: "1:458520250960:web:695a58086d4555e227df55"
+};
+const ALLOWED_EMAILS = [
+  "avinashmnavalgund87@gmail.com"
+];
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+const inr = n => "₹ " + Math.round(Number(n || 0)).toLocaleString("en-IN");
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const monthLabel = k => { const [y, m] = k.split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+let entries = [], bank = {}, tds = [], tdsPay = {};
+let unsubs = [];
+let state = { year: null, month: null };
+
+const mkey = e => e.month || (e.date || "").slice(0, 7);
+
+function startData() {
+  stopData();
+  unsubs.push(onSnapshot(collection(db, "entries"), s => { entries = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err => showDenied(err)));
+  unsubs.push(onSnapshot(collection(db, "bank"), s => { const b = {}; s.docs.forEach(d => { b[d.id] = d.data(); }); bank = b; render(); }));
+  unsubs.push(onSnapshot(collection(db, "tds"), s => { tds = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }));
+  unsubs.push(onSnapshot(collection(db, "tdsPay"), s => { const t = {}; s.docs.forEach(d => { t[d.id] = d.data(); }); tdsPay = t; render(); }));
+}
+function stopData() { unsubs.forEach(u => { try { u(); } catch (e) {} }); unsubs = []; }
+
+function showDenied(err) {
+  $("app").classList.add("hidden");
+  $("loginBox").classList.remove("hidden");
+  $("loginMsg").textContent = "This account cannot read the record. Use an account on the access list.";
+  console.warn(err);
+}
+
+// Build the month list from July 2026 to now, plus any month with data.
+function allMonths() {
+  const now = new Date();
+  const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const set = new Set([nowKey, ...Object.keys(bank), ...Object.keys(tdsPay), ...tds.map(t => t.month), ...entries.map(mkey)]);
+  const out = [];
+  for (let y = 2026, m = 7; `${y}-${String(m).padStart(2, "0")}` <= nowKey; m++) {
+    if (m > 12) { m = 1; y++; }
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+  return [...new Set([...out, ...set])].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+}
+
+// Carry the opening balance forward, same rule as the Statement tab.
+function monthRows(months) {
+  let prev = null;
+  return months.map(m => {
+    const b = bank[m] || {};
+    const spent = entries.filter(e => mkey(e) === m).reduce((s, e) => s + Number(e.amount || 0), 0);
+    const credits = Number(b.nobroker || 0) + Number(b.other || 0);
+    const opening = b.opening != null ? Number(b.opening) : prev;
+    const closing = opening == null ? null : opening + credits - spent;
+    prev = closing;
+    return { m, b, opening, credits, spent, closing, hasBank: !!bank[m] };
+  });
+}
+
+function render() {
+  if (!$("app") || $("app").classList.contains("hidden")) return;
+  const months = allMonths();
+  const years = [...new Set(months.map(m => m.slice(0, 4)))];
+  if (!state.year || !years.includes(state.year)) state.year = years[years.length - 1];
+  const inYear = months.filter(m => m.startsWith(state.year));
+  if (!state.month || !inYear.includes(state.month)) {
+    const nowKey = months[months.length - 1];
+    state.month = inYear.includes(nowKey) ? nowKey : inYear[inYear.length - 1];
+  }
+  $("year").innerHTML = years.map(y => `<option ${y === state.year ? "selected" : ""}>${y}</option>`).join("");
+  $("month").innerHTML = inYear.map(m => `<option value="${m}" ${m === state.month ? "selected" : ""}>${monthLabel(m)}</option>`).join("");
+
+  const rows = monthRows(months);
+  const cur = rows.find(r => r.m === state.month);
+  const yRows = rows.filter(r => r.m.startsWith(state.year));
+  const yearSpent = yRows.reduce((s, r) => s + r.spent, 0);
+  const yearCredits = yRows.reduce((s, r) => s + r.credits, 0);
+  const curEntries = entries.filter(e => mkey(e) === state.month);
+  const pending = curEntries.filter(e => e.amount == null).length;
+
+  $("who").textContent = "";
+  $("kpis").innerHTML = [
+    ["Closing bank balance", cur?.closing != null ? inr(cur.closing) : "Not entered", "This month"],
+    ["Expenditure this month", inr(cur?.spent), `${curEntries.filter(e => e.amount != null).length} entries${pending ? `, ${pending} without amount` : ""}`],
+    ["Credits this month", inr(cur?.credits), "NoBroker + other bank credits"],
+    [`Expenditure ${state.year}`, inr(yearSpent), `Credits ${inr(yearCredits)}`]
+  ].map(([l, v, s]) => `<div class="card kpi"><div class="l">${esc(l)}</div><div class="v">${esc(v)}</div><div class="l">${esc(s)}</div></div>`).join("");
+
+  $("mTitle").textContent = `Bank summary: ${monthLabel(state.month)}`;
+  const b = cur?.b || {};
+  const bankRows = [
+    ["Opening balance", cur?.opening != null ? inr(cur.opening) : "Not entered"],
+    ["NoBroker collections", inr(b.nobroker)],
+    ["Other bank credits", inr(b.other)],
+    ["Total bank expenditure", inr(cur?.spent)],
+    ["Closing bank balance", cur?.closing != null ? inr(cur.closing) : "Not entered"],
+    ["Cash Credit to the bank (flats)", b.flats ?? "—"]
+  ];
+  $("bankSummary").innerHTML = `<table><tbody>${bankRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${esc(v)}</td></tr>`).join("")}</tbody></table>`;
+
+  const ded = tds.filter(t => t.month === state.month).reduce((s, t) => s + Number(t.tds || 0), 0);
+  const pay = tdsPay[state.month];
+  const paid = pay ? Number(pay.paid || 0) : 0;
+  $("tdsSummary").innerHTML = `<table><tbody>
+    <tr><td>TDS deducted</td><td class="num">${inr(ded)}</td></tr>
+    <tr><td>Paid to Sandesh</td><td class="num">${pay ? inr(paid) : '<span class="bad">Not paid</span>'}</td></tr>
+    <tr><td>Difference</td><td class="num ${ded - paid ? "bad" : "good"}">${inr(ded - paid)}</td></tr>
+    <tr><td>Date paid</td><td class="num">${esc(pay?.date || "—")}</td></tr>
+  </tbody></table>`;
+
+  $("catTitle").textContent = `Expenditure by category: ${monthLabel(state.month)}`;
+  const byCat = {};
+  curEntries.forEach(e => { if (e.amount != null) byCat[e.category || "Other"] = (byCat[e.category || "Other"] || 0) + Number(e.amount); });
+  const catRows = Object.entries(byCat).sort((a, c) => c[1] - a[1]);
+  const maxC = Math.max(1, ...catRows.map(r => r[1]));
+  $("cats").innerHTML = catRows.length
+    ? catRows.map(([k, v]) => `<tr><td style="width:32%">${esc(k)}</td><td><div class="bar" style="width:${(v / maxC * 100).toFixed(1)}%"></div></td><td class="num">${inr(v)}</td></tr>`).join("")
+    : '<tr><td class="muted">No amounts recorded for this month.</td></tr>';
+
+  $("yTitle").textContent = `Month by month: ${state.year}`;
+  $("months").innerHTML = yRows.map(r => `<tr>
+    <td>${monthLabel(r.m)}</td>
+    <td class="num">${r.opening != null ? inr(r.opening) : "—"}</td>
+    <td class="num">${inr(r.credits)}</td>
+    <td class="num">${inr(r.spent)}</td>
+    <td class="num">${r.closing != null ? inr(r.closing) : "—"}</td></tr>`).join("");
+}
+
+$("year").addEventListener("change", e => { state.year = e.target.value; state.month = null; render(); });
+$("month").addEventListener("change", e => { state.month = e.target.value; render(); });
+
+$("signout").addEventListener("click", () => signOut(auth));
+$("gbtn").addEventListener("click", () => signInWithPopup(auth, new GoogleAuthProvider()).catch(e => { $("loginMsg").textContent = e.message; }));
+$("eform").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try { await signInWithEmailAndPassword(auth, String(f.get("email")).trim(), String(f.get("password"))); }
+  catch (e) { $("loginMsg").textContent = "Sign-in failed. Check the email and password."; }
+});
+
+onAuthStateChanged(auth, u => {
+  stopData();
+  const email = (u?.email || "").toLowerCase();
+  const listed = ALLOWED_EMAILS.includes(email);
+  const needsVerify = u && u.providerData?.[0]?.providerId === "password" && !u.emailVerified;
+  if (!u || !listed || needsVerify) {
+    $("app").classList.add("hidden");
+    $("loginBox").classList.remove("hidden");
+    if (u && !listed) { $("loginMsg").textContent = "This account is not on the access list."; signOut(auth); }
+    if (needsVerify) $("loginMsg").textContent = "Verify your email first, then sign in.";
+    return;
+  }
+  $("loginBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("who").textContent = `Signed in as ${u.email}`;
+  startData();
+});
+</script>
+</body>
+</html>
