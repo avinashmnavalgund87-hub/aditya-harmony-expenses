@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monthly Expenses</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec; --accent:#2f6fdb; --bad:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#14171d; --card:#1d2129; --ink:#e8ebf1; --muted:#9aa3b2; --line:#2c323d; --accent:#6ea8ff; --bad:#ff7b6b; } }
+  :root[data-theme="dark"] { --bg:#14171d; --card:#1d2129; --ink:#e8ebf1; --muted:#9aa3b2; --line:#2c323d; --accent:#6ea8ff; --bad:#ff7b6b; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 12px; }
+  h2 { font-size:16px; margin:0 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  .row > label { display:grid; gap:4px; font-size:13px; color:var(--muted); flex:1 1 140px; }
+  select, input { font:inherit; padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); width:100%; box-sizing:border-box; }
+  button { font:inherit; padding:9px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--bad); padding:4px 8px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-size:13px; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tablewrap { overflow-x:auto; }
+  .total { font-size:20px; font-weight:600; }
+  .muted { color:var(--muted); }
+  .hidden { display:none; }
+  .msg { color:var(--bad); min-height:1em; }
+</style>
+</head>
+<body>
+<main>
+  <div id="loginBox" class="card hidden" style="max-width:380px;margin:40px auto">
+    <h2>Sign in</h2>
+    <button id="gbtn" style="width:100%;margin-bottom:10px">Sign in with Google</button>
+    <form id="eform" style="display:grid;gap:8px">
+      <input type="email" name="email" placeholder="Email" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign in with email</button>
+    </form>
+    <p id="loginMsg" class="msg"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <h1 style="margin:0">Monthly Expenses</h1>
+      <div class="muted"><span id="who"></span> <button id="signout" class="ghost">Sign out</button></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label>Month<input type="month" id="month"></label>
+        <div style="text-align:right;flex:0 0 auto">
+          <div class="muted" style="font-size:13px">Total this month</div>
+          <div class="total" id="total">₹ 0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>By category</h2>
+      <div class="tablewrap"><table><tbody id="cats"></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Add expense</h2>
+      <form id="addForm" class="row">
+        <label>Date<input type="date" name="date" required></label>
+        <label>Category<select name="category" required>
+          <option>Food</option><option>Investment</option><option>Home loan</option><option>Fees</option>
+          <option>Fuel</option><option>Grocery</option><option>Vegetables</option>
+        </select></label>
+        <label>Amount (₹)<input type="number" name="amount" min="0" step="1" required></label>
+        <label style="flex:2 1 200px">Note<input type="text" name="note" maxlength="120"></label>
+        <button type="submit">Add</button>
+      </form>
+      <p id="addMsg" class="msg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Entries this month</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Date</th><th>Category</th><th>Note</th><th class="num">Amount</th><th></th></tr></thead>
+        <tbody id="list"></tbody>
+      </table></div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// Same project and access list as the other pages. Collection: personalExpenses.
+const firebaseConfig = {
+  apiKey: "AIzaSyDSLSgonSDEchLKGebkGKyB6V7XUEXNR_s",
+  authDomain: "aditya-harmony.firebaseapp.com",
+  projectId: "aditya-harmony",
+  storageBucket: "aditya-harmony.firebasestorage.app",
+  messagingSenderId: "458520250960",
+  appId: "1:458520250960:web:695a58086d4555e227df55"
+};
+const ALLOWED_EMAILS = [
+  "avinashmnavalgund87@gmail.com",
+  "aniludupi@gmail.com",
+  "dinashetty1@gmail.com",
+  "pradeephosanagar@gmail.com"
+];
+const CATS = ["Food", "Investment", "Home loan", "Fees", "Fuel", "Grocery", "Vegetables"];
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+const inr = n => "₹ " + Math.round(Number(n || 0)).toLocaleString("en-IN");
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const todayKey = () => new Date().toISOString().slice(0, 10);
+const monthOfToday = () => todayKey().slice(0, 7);
+
+let rows = [];
+let unsub = null;
+let month = monthOfToday();
+let armed = null;
+
+$("month").value = month;
+$("month").addEventListener("change", e => { month = e.target.value || monthOfToday(); render(); });
+
+function startData() {
+  if (unsub) { try { unsub(); } catch (e) {} }
+  unsub = onSnapshot(collection(db, "personalExpenses"),
+    s => { rows = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); },
+    err => { $("loginMsg").textContent = "Cannot read the expenses. Check the account and the Firestore rules."; console.warn(err); });
+}
+
+function render() {
+  const mine = rows.filter(r => (r.date || "").slice(0, 7) === month).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const total = mine.reduce((s, r) => s + Number(r.amount || 0), 0);
+  $("total").textContent = inr(total);
+
+  const byCat = Object.fromEntries(CATS.map(c => [c, 0]));
+  mine.forEach(r => { byCat[r.category] = (byCat[r.category] || 0) + Number(r.amount || 0); });
+  $("cats").innerHTML = Object.entries(byCat).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${inr(v)}</td></tr>`).join("");
+
+  $("list").innerHTML = mine.length
+    ? mine.map(r => `<tr>
+        <td>${esc(r.date)}</td><td>${esc(r.category)}</td><td>${esc(r.note || "")}</td>
+        <td class="num">${inr(r.amount)}</td>
+        <td><button class="ghost" data-del="${esc(r.id)}">${armed === r.id ? "Confirm delete" : "Delete"}</button></td></tr>`).join("")
+    : '<tr><td colspan="5" class="muted">No expenses for this month.</td></tr>';
+  document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+    const id = b.getAttribute("data-del");
+    if (armed !== id) { armed = id; render(); return; }
+    armed = null;
+    try { await deleteDoc(doc(db, "personalExpenses", id)); } catch (e) { $("addMsg").textContent = "Could not delete. Try again."; }
+  }));
+}
+
+$("addForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const amount = Number(f.get("amount"));
+  if (!(amount >= 0)) { $("addMsg").textContent = "Enter a valid amount."; return; }
+  const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2);
+  try {
+    await setDoc(doc(db, "personalExpenses", id), {
+      date: String(f.get("date")), category: String(f.get("category")), amount, note: String(f.get("note") || "").trim()
+    });
+    $("addMsg").textContent = "";
+    ev.target.reset();
+    month = String(f.get("date")).slice(0, 7);
+    $("month").value = month;
+  } catch (e) { $("addMsg").textContent = "Could not save. Check your connection and the rules."; }
+});
+
+$("signout").addEventListener("click", () => signOut(auth));
+$("gbtn").addEventListener("click", () => signInWithPopup(auth, new GoogleAuthProvider()).catch(e => { $("loginMsg").textContent = e.message; }));
+$("eform").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try { await signInWithEmailAndPassword(auth, String(f.get("email")).trim(), String(f.get("password"))); }
+  catch (e) { $("loginMsg").textContent = "Sign-in failed. Check the email and password."; }
+});
+
+onAuthStateChanged(auth, u => {
+  const email = (u?.email || "").toLowerCase();
+  const listed = ALLOWED_EMAILS.includes(email);
+  const needsVerify = u && u.providerData?.[0]?.providerId === "password" && !u.emailVerified;
+  if (!u || !listed || needsVerify) {
+    if (unsub) { try { unsub(); } catch (e) {} unsub = null; }
+    $("app").classList.add("hidden");
+    $("loginBox").classList.remove("hidden");
+    if (u && !listed) { $("loginMsg").textContent = "This account is not on the access list."; signOut(auth); }
+    if (needsVerify) $("loginMsg").textContent = "Verify your email first, then sign in.";
+    return;
+  }
+  $("loginBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("who").textContent = u.email;
+  startData();
+});
+</script>
+</body>
+</html>
