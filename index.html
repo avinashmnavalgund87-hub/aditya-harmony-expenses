@@ -157,9 +157,43 @@ let filterText = "";
 let lastRows = [];
 let recMonth = null;
 let expMonth = null;
+let detMonth = null;
 let tds = [];
 let tdsPay = {};
 let tdsMonthSel = null;
+let catSettings = { added: [], removed: [] };
+let catArmed = null;
+
+// Categories = built-in list, minus any removed, plus any added.
+function categoryList() {
+  return [...CATEGORIES.filter(c => !catSettings.removed.includes(c)),
+          ...catSettings.added.filter(c => !CATEGORIES.includes(c))];
+}
+async function saveCats(next, msg) {
+  catSettings = next;
+  await write(setDoc(doc(db, "settings", "categories"), { added: next.added, removed: next.removed }), msg);
+  render();
+}
+function catCard() {
+  const list = categoryList();
+  const used = c => entries.filter(e => e.category === c).length;
+  return `
+    <div class="card">
+      <h2>Categories</h2>
+      <div class="actions" style="margin-bottom:12px">
+        <input type="text" id="catName" maxlength="60" placeholder="New category name" style="flex:1">
+        <button class="btn primary" type="button" id="catAdd">Add category</button>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Category</th><th class="num">Entries</th><th></th></tr></thead>
+        <tbody>${list.map(c => `<tr>
+          <td>${esc(c)}</td><td class="num">${used(c)}</td>
+          <td><button class="btn small danger" type="button" data-cat="${esc(c)}">${catArmed === c ? "Confirm delete" : "Delete"}</button></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      <p class="hint">A category that has entries can't be deleted. Move those entries to another category first.</p>
+    </div>`;
+}
 const canWrite = true; // the security rules decide who can actually write
 
 const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -315,6 +349,9 @@ function startData() {
   unsubs.push(onSnapshot(collection(db, "bank"),
     s => { const b = {}; s.docs.forEach(d => { b[d.id] = d.data(); }); bank = b; render(); },
     () => {}));
+  unsubs.push(onSnapshot(doc(db, "settings", "categories"),
+    s => { const d = s.exists() ? s.data() : {}; catSettings = { added: d.added || [], removed: d.removed || [] }; render(); },
+    () => {}));
 }
 function stopData() {
   unsubs.forEach(u => u());
@@ -323,6 +360,13 @@ function stopData() {
 }
 
 // ---------- Views ----------
+// Cash paid out for a month: summed from Daily entries marked Cash. Falls back to the stored figure for imported months with no cash entries.
+function cashPaidOut(m) {
+  const cashRows = entries.filter(e => mkey(e) === m && e.ptype === "Cash");
+  if (cashRows.length) return cashRows.reduce((s, e) => s + Number(e.amount || 0), 0);
+  return bank[m]?.cashOut ?? 0;
+}
+
 function bankCard(p) {
   if (p === "undated") return '<div class="card"><h2>Bank summary</h2><p class="empty">Choose a month above to enter its bank figures.</p></div>';
   const b = bank[p] || {};
@@ -338,7 +382,7 @@ function bankCard(p) {
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
-    ["Cash Credit to the bank", b.flats ?? "—"]
+    ["Cash given to the Association Member (number of flats)", b.flats ?? "—"]
   ];
   return `
     <div class="card">
@@ -347,9 +391,8 @@ function bankCard(p) {
         <label class="field">Opening balance (₹)<input type="number" name="opening" step="1" value="${esc(num(b.opening))}"></label>
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
-        <label class="field">Cash Credit to the bank (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
-        <label class="field">Cash in (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
-        <label class="field">Cash paid out (₹)<input type="number" name="cashOut" min="0" step="1" value="${esc(num(b.cashOut))}"></label>
+        <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
+        <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
         <label class="field" style="grid-column:1/-1">Fixed deposits (one per line: name, amount)<textarea name="fds" rows="3">${esc((b.fds || []).map(f => `${f.name}, ${f.amount}`).join("\n"))}</textarea></label>
         <label class="field">Imprest holder<input type="text" name="impHolder" maxlength="60" value="${esc(b.impHolder || "")}"></label>
@@ -454,12 +497,12 @@ function entriesView() {
     .filter(e => (q ? [e.category, e.payee, e.note, e.date].join(" ").toLowerCase().includes(q) : inPeriod(e, p)))
     .sort(byDateDesc);
 
-  const form = `
+  const form = catCard() + `
     <div class="card">
       <h2>${e0 ? "Edit entry" : "Add a daily entry"}</h2>
       <form id="form" class="entry-form">
         <label class="field">Date<input type="date" name="date" value="${esc(e0 ? e0.date : today())}"></label>
-        <label class="field">Category<select name="category">${CATEGORIES.map(c => `<option ${e0?.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+        <label class="field">Category<select name="category">${categoryList().map(c => `<option ${e0?.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
         <label class="field">Paid to / by<input type="text" name="payee" list="payees" maxlength="80" value="${esc(e0?.payee || "")}"><datalist id="payees">${PAYEES.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
         <label class="field">Amount (₹)<input type="number" name="amount" min="0" step="1" placeholder="Blank if pending" value="${esc(e0?.amount ?? "")}"></label>
         <label class="field">Note<input type="text" name="note" maxlength="120" value="${esc(e0?.note || "")}"></label>
@@ -526,8 +569,9 @@ function statementView() {
   });
   lastRows = rows;
   const imported = ["2026-07", "2026-08", "2026-09"].some(m => bank[m]);
-  const withCash = rows.filter(r => r.b && (r.b.cashIn != null || r.b.cashOut != null));
-  const detail = entries.filter(e => mkey(e)).slice().sort((a, b) => mkey(a).localeCompare(mkey(b)) || a.category.localeCompare(b.category));
+  const withCash = rows.filter(r => r.b && (r.b.cashIn != null || cashPaidOut(r.m) > 0));
+  const dtM = ms.includes(detMonth) ? detMonth : ms[ms.length - 1];
+  const detail = entries.filter(e => mkey(e) === dtM).slice().sort((a, b) => a.category.localeCompare(b.category) || (a.date || "").localeCompare(b.date || ""));
 
   const recM = ms.includes(recMonth) ? recMonth : ms[ms.length - 1];
   const rr = rows.find(r => r.m === recM);
@@ -621,8 +665,8 @@ function statementView() {
     <div class="card">
       <h2>Cash</h2>
       ${withCash.length ? `<div class="tablewrap"><table>
-        <thead><tr><th>Month</th><th style="text-align:right">Cash in</th><th style="text-align:right">Cash paid out</th></tr></thead>
-        <tbody>${withCash.map(r => `<tr><td>${monthLabel(r.m)}</td><td class="num">${fmtOr(r.b.cashIn)}</td><td class="num">${fmtOr(r.b.cashOut)}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>Month</th><th style="text-align:right">Cash given to the Association Member (number of flats)</th><th style="text-align:right">Cash paid out</th></tr></thead>
+        <tbody>${withCash.map(r => `<tr><td>${monthLabel(r.m)}</td><td class="num">${fmtOr(r.b.cashIn)}</td><td class="num">${fmtOr(cashPaidOut(r.m))}</td></tr>`).join("")}</tbody>
       </table></div>` : '<p class="empty">No cash figures yet.</p>'}
       <p class="hint">Cash is kept apart from the bank balance. Cash in includes cash withdrawn from the bank.</p>
     </div>
@@ -630,6 +674,7 @@ function statementView() {
     ${expCard}
     <div class="card">
       <h2>Expenditure by month</h2>
+      <div class="toolbar"><label>Month<select id="detMonth">${ms.map(m => `<option value="${m}" ${m === dtM ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></label></div>
       <div class="tablewrap"><table>
         <thead><tr><th>Month</th><th>Category</th><th>Paid to / note</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>${detail.map(e => `<tr>
@@ -676,14 +721,14 @@ function monthCsv(m) {
     row(["Expenditure (debits)", r ? r.debits : 0]),
     row(["Closing balance", num(r?.closing)]),
     "",
-    row(["Cash in", num(r?.b?.cashIn)]),
+    row(["Cash given to the Association Member (number of flats)", num(r?.b?.cashIn)]),
     row(["Cash in hand (month end)", num(r?.b?.cashHand)]),
     row(["Imprest holder", r?.b?.impHolder || ""]),
     row(["Imprest opening cash", num(r?.b?.impOpen)]),
     ...((r?.b?.impRec) || []).map(x => row(["Imprest received - " + x.particulars, x.amount])),
     ...((r?.b?.impPay) || []).map(x => row(["Imprest paid - " + x.particulars, x.amount])),
     ...((r?.b?.fds) || []).map(f => row(["Fixed deposit - " + f.name, f.amount])),
-    row(["Cash paid out", num(r?.b?.cashOut)]),
+    row(["Cash paid out", r ? cashPaidOut(r.m) : ""]),
     "",
     row(["Date", "Category", "Paid to / by", "Note", "Amount (INR)"])
   ];
@@ -846,6 +891,28 @@ function render() {
 }
 
 function bind() {
+  const catAdd = document.getElementById("catAdd");
+  if (catAdd) catAdd.addEventListener("click", async () => {
+    const name = String(document.getElementById("catName").value || "").trim();
+    if (!name) { setMsg("Type a category name.", true); return; }
+    if (categoryList().some(c => c.toLowerCase() === name.toLowerCase())) { setMsg("That category already exists.", true); return; }
+    const added = [...catSettings.added.filter(c => c !== name), name];
+    const removed = catSettings.removed.filter(c => c !== name);
+    await saveCats({ added, removed }, "Category added.");
+  });
+  document.querySelectorAll("[data-cat]").forEach(b => b.addEventListener("click", async () => {
+    const c = b.dataset.cat;
+    if (catArmed !== c) { catArmed = c; render(); return; }
+    catArmed = null;
+    if (entries.some(e => e.category === c)) { setMsg(`"${c}" has entries, so it can't be deleted yet.`, true); render(); return; }
+    const isBuiltIn = CATEGORIES.includes(c);
+    const next = {
+      added: catSettings.added.filter(x => x !== c),
+      removed: isBuiltIn ? [...new Set([...catSettings.removed, c])] : catSettings.removed
+    };
+    await saveCats(next, "Category deleted.");
+  }));
+
   const per = document.getElementById("period");
   if (per) per.addEventListener("change", () => { period = per.value; render(); });
 
@@ -861,7 +928,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashIn: n("cashIn"), cashOut: n("cashOut"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashIn: n("cashIn"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
@@ -891,6 +958,7 @@ function bind() {
   document.getElementById("monthXlsx")?.addEventListener("click", () => monthXlsx(document.getElementById("csvMonth").value));
   document.getElementById("recMonth")?.addEventListener("change", e => { recMonth = e.target.value; render(); });
   document.getElementById("expMonth")?.addEventListener("change", e => { expMonth = e.target.value; render(); });
+  document.getElementById("detMonth")?.addEventListener("change", e => { detMonth = e.target.value; render(); });
   const tf = document.getElementById("tdsForm");
   if (tf) tf.addEventListener("submit", async ev => {
     ev.preventDefault();
