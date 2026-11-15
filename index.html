@@ -163,6 +163,7 @@ let tdsPay = {};
 let tdsMonthSel = null;
 let catSettings = { added: [], removed: [] };
 let catArmed = null;
+let pendingTds = null;
 
 // Categories = built-in list, minus any removed, plus any added.
 function categoryList() {
@@ -507,11 +508,26 @@ function entriesView() {
         <label class="field">Amount (₹)<input type="number" name="amount" min="0" step="1" placeholder="Blank if pending" value="${esc(e0?.amount ?? "")}"></label>
         <label class="field">Note<input type="text" name="note" maxlength="120" value="${esc(e0?.note || "")}"></label>
         <label class="field">Payment type<select name="ptype"><option ${e0?.ptype !== "Cash" ? "selected" : ""}>Bank</option><option ${e0?.ptype === "Cash" ? "selected" : ""}>Cash</option></select></label>
+        <label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="withTds" ${e0?.tdsId ? "checked" : ""}> Deduct TDS for this payment</label>
         <div class="actions">
           <button class="btn primary" type="submit">${e0 ? "Save changes" : "Add entry"}</button>
           ${e0 ? '<button class="btn" type="button" id="cancel">Cancel</button>' : ""}
         </div>
       </form>
+      <dialog id="tdsDlg" style="background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;max-width:440px;width:92%">
+        <h2>TDS deduction</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <label class="field">TDS %<input type="number" id="tdsPct" min="0" max="100" step="0.01"></label>
+          <label class="field">PAN number<input type="text" id="tdsPan" maxlength="10" style="text-transform:uppercase"></label>
+        </div>
+        <label class="field" style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="tdsNoPan"> PAN not available (N/A)</label>
+        <label class="field" style="margin-top:10px">TDS amount (₹)<input type="number" id="tdsAmt" min="0" step="1"></label>
+        <p class="hint">TDS amount is worked out from the entry amount and TDS %. You can change it.</p>
+        <div class="actions">
+          <button class="btn" type="button" id="tdsCancel">Cancel</button>
+          <button class="btn primary" type="button" id="tdsSave">Save entry with TDS</button>
+        </div>
+      </dialog>
     </div>`;
 
   return `
@@ -891,6 +907,43 @@ function render() {
 }
 
 function bind() {
+  const tdsDlg = document.getElementById("tdsDlg");
+  if (tdsDlg) {
+    const pctEl = document.getElementById("tdsPct"), amtEl = document.getElementById("tdsAmt");
+    const panEl = document.getElementById("tdsPan"), noPanEl = document.getElementById("tdsNoPan");
+    pctEl.addEventListener("input", () => {
+      amtEl.value = pendingTds ? Math.round(pendingTds.entry.amount * Number(pctEl.value || 0) / 100) : "";
+    });
+    noPanEl.addEventListener("change", () => { panEl.disabled = noPanEl.checked; if (noPanEl.checked) panEl.value = ""; });
+    document.getElementById("tdsCancel").addEventListener("click", () => { pendingTds = null; tdsDlg.close(); });
+    document.getElementById("tdsSave").addEventListener("click", async () => {
+      if (!pendingTds) return;
+      if (pctEl.value === "") { setMsg("Enter the TDS %.", true); return; }
+      const noPan = noPanEl.checked;
+      const pan = panEl.value.trim().toUpperCase();
+      if (!noPan && !pan) { setMsg("Enter the PAN, or tick PAN not available.", true); return; }
+      if (amtEl.value === "") { setMsg("Enter the TDS amount.", true); return; }
+      const tdsId = pendingTds.tdsId || uid();
+      const line = {
+        month: (pendingTds.entry.date || "").slice(0, 7),
+        vendor: pendingTds.entry.payee,
+        pan: noPan ? "N/A" : pan,
+        section: "",
+        gross: pendingTds.entry.amount,
+        tds: Number(amtEl.value),
+        tdsPct: Number(pctEl.value),
+        entryId: pendingTds.id
+      };
+      const entry = { ...pendingTds.entry, tdsId };
+      const wasEditing = pendingTds.wasEditing;
+      const ok = await write(Promise.all([
+        setDoc(doc(db, "entries", pendingTds.id), entry),
+        setDoc(doc(db, "tds", tdsId), line)
+      ]), wasEditing ? "Entry and TDS updated." : "Entry and TDS added.");
+      if (ok) { pendingTds = null; editingId = null; tdsDlg.close(); render(); }
+    });
+  }
+
   const catAdd = document.getElementById("catAdd");
   if (catAdd) catAdd.addEventListener("click", async () => {
     const name = String(document.getElementById("catName").value || "").trim();
@@ -948,7 +1001,23 @@ function bind() {
       ptype: String(f.get("ptype") || "Bank")
     };
     const id = editingId || uid();
-    const ok = await write(setDoc(doc(db, "entries", id), entry), wasEditing ? "Entry updated." : "Entry added.");
+    const existing = wasEditing ? entries.find(x => x.id === wasEditing) : null;
+    if (f.get("withTds") === "on") {
+      if (amount === null || amount <= 0) { setMsg("Enter the amount before adding TDS.", true); return; }
+      if (!entry.payee) { setMsg("Enter who was paid, so the TDS line has a name.", true); return; }
+      const line = existing?.tdsId ? tds.find(t => t.id === existing.tdsId) : null;
+      pendingTds = { entry, id, tdsId: existing?.tdsId || null, wasEditing: !!wasEditing, line };
+      document.getElementById("tdsPct").value = line?.tdsPct ?? "";
+      document.getElementById("tdsPan").value = line && line.pan !== "N/A" ? line.pan : "";
+      document.getElementById("tdsNoPan").checked = line?.pan === "N/A";
+      document.getElementById("tdsPan").disabled = line?.pan === "N/A";
+      document.getElementById("tdsAmt").value = line ? line.tds : "";
+      document.getElementById("tdsDlg").showModal();
+      return;
+    }
+    const ops = [setDoc(doc(db, "entries", id), entry)];
+    if (existing?.tdsId) ops.push(deleteDoc(doc(db, "tds", existing.tdsId)));
+    const ok = await write(Promise.all(ops), wasEditing ? "Entry updated." : "Entry added.");
     if (ok) { editingId = null; render(); }
   });
 
@@ -1007,7 +1076,10 @@ function bind() {
       setTimeout(() => { if (b.isConnected) { b.dataset.armed = ""; b.textContent = "Delete"; } }, 4000);
       return;
     }
-    await write(deleteDoc(doc(db, "entries", b.dataset.del)), "Entry deleted.");
+    const gone = entries.find(x => x.id === b.dataset.del);
+    const ops = [deleteDoc(doc(db, "entries", b.dataset.del))];
+    if (gone?.tdsId) ops.push(deleteDoc(doc(db, "tds", gone.tdsId)));
+    await write(Promise.all(ops), "Entry deleted.");
   }));
 }
 
