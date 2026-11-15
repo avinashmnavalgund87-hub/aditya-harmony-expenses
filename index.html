@@ -186,13 +186,10 @@ function catCard() {
         <input type="text" id="catName" maxlength="60" placeholder="New category name" style="flex:1">
         <button class="btn primary" type="button" id="catAdd">Add category</button>
       </div>
-      <div class="tablewrap"><table>
-        <thead><tr><th>Category</th><th class="num">Entries</th><th></th></tr></thead>
-        <tbody>${list.map(c => `<tr>
-          <td>${esc(c)}</td><td class="num">${used(c)}</td>
-          <td><button class="btn small danger" type="button" data-cat="${esc(c)}">${catArmed === c ? "Confirm delete" : "Delete"}</button></td>
-        </tr>`).join("")}</tbody>
-      </table></div>
+      <div class="actions" style="margin-bottom:8px">
+        <select id="catPick" style="flex:1">${list.map(c => `<option value="${esc(c)}">${esc(c)} (${used(c)} entries)</option>`).join("")}</select>
+        <button class="btn danger" type="button" id="catDel">${catArmed ? "Confirm delete" : "Delete category"}</button>
+      </div>
       <p class="hint">A category that has entries can't be deleted. Move those entries to another category first.</p>
     </div>`;
 }
@@ -965,8 +962,9 @@ function bind() {
     const removed = catSettings.removed.filter(c => c !== name);
     await saveCats({ added, removed }, "Category added.");
   });
-  document.querySelectorAll("[data-cat]").forEach(b => b.addEventListener("click", async () => {
-    const c = b.dataset.cat;
+  const catDel = document.getElementById("catDel");
+  if (catDel) catDel.addEventListener("click", async () => {
+    const c = document.getElementById("catPick").value;
     if (catArmed !== c) { catArmed = c; render(); return; }
     catArmed = null;
     if (entries.some(e => e.category === c)) { setMsg(`"${c}" has entries, so it can't be deleted yet.`, true); render(); return; }
@@ -976,7 +974,7 @@ function bind() {
       removed: isBuiltIn ? [...new Set([...catSettings.removed, c])] : catSettings.removed
     };
     await saveCats(next, "Category deleted.");
-  }));
+  });
 
   const per = document.getElementById("period");
   if (per) per.addEventListener("change", () => { period = per.value; render(); });
