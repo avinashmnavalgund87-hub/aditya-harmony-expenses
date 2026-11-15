@@ -128,10 +128,12 @@ const ALLOWED_EMAILS = [
   "pradeephosanagar@gmail.com"
 ];
 
+// Only these categories carry TDS.
+const TDS_CATEGORIES = ["Security", "VGC Maintenance", "AMC"];
 const CATEGORIES = [
   "Salaries", "Bank transfers",
   "Housekeeping", "Electricity", "Fuel", "TDS", "Waste Management", "Garden Management", "Security",
-  "Quarterly Maintenance Collection", "Water Consumption Charges", "Water Board Maintenance Charges", "BWSSB", "AMC",
+  "Quarterly Maintenance Collection", "Water Consumption Charges", "Water Board Maintenance Charges", "BWSSB", "AMC", "VGC Maintenance",
   "Electrician - In call", "Plumber - In call", "Water Body Maintenance Supply", "Housekeeping Material In ward", "BBMP", "Purchases", "Other"
 ];
 const PAYEES = [
@@ -367,6 +369,17 @@ function cashPaidOut(m) {
   return bank[m]?.cashOut ?? 0;
 }
 
+// TDS % choices: the usual rates, plus any rate already used on a TDS line.
+function tdsPctOptions() {
+  const set = new Set([1, 2, 5, 10, 20, ...tds.map(t => Number(t.tdsPct)).filter(n => n > 0)]);
+  return [...set].sort((a, b) => a - b);
+}
+// PAN remembered per vendor, from TDS lines already saved.
+function panForPayee(name) {
+  const hit = tds.find(t => (t.vendor || "").toLowerCase() === name.toLowerCase() && t.pan && t.pan !== "N/A");
+  return hit ? hit.pan : null;
+}
+
 function bankCard(p) {
   if (p === "undated") return '<div class="card"><h2>Bank summary</h2><p class="empty">Choose a month above to enter its bank figures.</p></div>';
   const b = bank[p] || {};
@@ -508,14 +521,22 @@ function entriesView() {
         <label class="field">Amount (₹)<input type="number" name="amount" min="0" step="1" placeholder="Blank if pending" value="${esc(e0?.amount ?? "")}"></label>
         <label class="field">Note<input type="text" name="note" maxlength="120" value="${esc(e0?.note || "")}"></label>
         <label class="field">Payment type<select name="ptype"><option ${e0?.ptype !== "Cash" ? "selected" : ""}>Bank</option><option ${e0?.ptype === "Cash" ? "selected" : ""}>Cash</option></select></label>
-        <label class="field" style="flex-direction:row;align-items:center;gap:8px;grid-column:1/-1"><input type="checkbox" name="withTds" id="withTds" ${e0?.tdsId ? "checked" : ""}> Deduct TDS for this payment</label>
-        <div id="tdsFields" class="tds-fields" ${e0?.tdsId ? "" : "hidden"} style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;border:1px dashed var(--line);border-radius:10px;padding:12px">
-          <label class="field">TDS %<input type="number" name="tdsPct" min="0" max="100" step="0.01" value="${esc(tdsLine?.tdsPct ?? "")}"></label>
-          <label class="field">PAN number<input type="text" name="tdsPan" maxlength="10" style="text-transform:uppercase" value="${esc(tdsLine && tdsLine.pan !== "N/A" ? tdsLine.pan : "")}" ${tdsLine?.pan === "N/A" ? "disabled" : ""}></label>
-          <label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="tdsNoPan" id="tdsNoPan" ${tdsLine?.pan === "N/A" ? "checked" : ""}> PAN not available (N/A)</label>
-          <label class="field">TDS amount (₹)<input type="number" name="tdsAmt" min="0" step="1" value="${esc(tdsLine?.tds ?? "")}"></label>
-          <p class="hint" style="grid-column:1/-1;margin:0">TDS amount is worked out from the amount and TDS %. You can change it.</p>
+        <div id="tdsSection" class="tds-fields" style="grid-column:1/-1;border:1px solid var(--line);border-radius:10px;padding:12px;${(e0 ? TDS_CATEGORIES.includes(e0.category) : false) ? "" : "display:none"}">
+          <label class="field">TDS<select name="tdsApplicable" id="tdsApplicable"><option value="Applicable" ${tdsLine || !e0 ? "selected" : ""}>Applicable</option><option value="Not applicable" ${tdsLine || !e0 ? "" : "selected"}>Not applicable</option></select></label>
+          <div id="tdsFields" style="margin-top:12px;display:${tdsLine || !e0 ? "grid" : "none"};grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+            <label class="field">TDS %<select name="tdsPct">${tdsPctOptions().map(p => `<option value="${p}" ${Number(tdsLine?.tdsPct) === p ? "selected" : ""}>${p}%</option>`).join("")}</select></label>
+            <label class="field">PAN number<input type="text" name="tdsPan" maxlength="10" style="text-transform:uppercase" value="${esc(tdsLine && tdsLine.pan !== "N/A" ? tdsLine.pan : "")}" ${tdsLine?.pan === "N/A" ? "disabled" : ""}></label>
+            <label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="tdsNoPan" id="tdsNoPan" ${tdsLine?.pan === "N/A" ? "checked" : ""}> PAN not available (N/A)</label>
+            <label class="field">TDS amount (₹)<input type="number" name="tdsAmt" min="0" step="1" value="${esc(tdsLine?.tds ?? "")}"></label>
+            <p id="panNote" class="hint" style="grid-column:1/-1;margin:0;color:var(--bad)"></p>
+            <p class="hint" style="grid-column:1/-1;margin:0">TDS amount is worked out from the amount and TDS %. You can change it.</p>
+          </div>
         </div>
+        <div class="actions">
+          <button class="btn primary" type="submit">${e0 ? "Save changes" : "Add entry"}</button>
+          ${e0 ? '<button class="btn" type="button" id="cancel">Cancel</button>' : ""}
+        </div>
+      </form>
     </div>`;
 
   return `
@@ -811,12 +832,12 @@ function tdsView() {
     <div class="card">
       <h2>TDS by vendor</h2>
       <div class="tablewrap"><table>
-        <thead><tr><th>Month</th><th>Vendor</th><th>PAN</th><th>Section</th><th style="text-align:right">Gross</th><th style="text-align:right">TDS</th><th style="text-align:right">Net payment</th><th></th></tr></thead>
+        <thead><tr><th>Month</th><th>Vendor</th><th>PAN</th><th>Section</th><th style="text-align:right">Gross</th><th style="text-align:right">TDS %</th><th style="text-align:right">TDS</th><th style="text-align:right">Net payment</th><th></th></tr></thead>
         <tbody>${lines.map(r => `<tr>
           <td>${monthLabel(r.month)}</td><td>${esc(r.vendor)}</td><td>${esc(r.pan || "")}</td><td>${esc(r.section || "")}</td>
-          <td class="num">${inr(r.gross)}</td><td class="num">${inr(r.tds)}</td><td class="num">${inr(Number(r.gross || 0) - Number(r.tds || 0))}</td>
+          <td class="num">${inr(r.gross)}</td><td class="num">${r.tdsPct != null ? r.tdsPct + "%" : ""}</td><td class="num">${inr(r.tds)}</td><td class="num">${inr(Number(r.gross || 0) - Number(r.tds || 0))}</td>
           <td><button class="btn small danger" data-tdel="${r.id}">Delete</button></td>
-        </tr>`).join("") || '<tr><td colspan="8" class="empty">No TDS lines yet.</td></tr>'}</tbody>
+        </tr>`).join("") || '<tr><td colspan="9" class="empty">No TDS lines yet.</td></tr>'}</tbody>
       </table></div>
     </div>`;
 }
@@ -894,18 +915,45 @@ function render() {
 }
 
 function bind() {
-  const withTdsEl = document.getElementById("withTds");
-  if (withTdsEl) {
-    const formEl = document.getElementById("form");
-    const box = document.getElementById("tdsFields");
-    withTdsEl.addEventListener("change", () => { box.hidden = !withTdsEl.checked; });
+  const formEl = document.getElementById("form");
+  if (formEl && formEl.elements.tdsPct) {
     const noPanEl = document.getElementById("tdsNoPan");
     const panEl = formEl.elements.tdsPan;
-    noPanEl.addEventListener("change", () => { panEl.disabled = noPanEl.checked; if (noPanEl.checked) panEl.value = ""; });
     const amountEl = formEl.elements.amount, pctEl = formEl.elements.tdsPct, tdsAmtEl = formEl.elements.tdsAmt;
-    pctEl.addEventListener("input", () => {
-      tdsAmtEl.value = Math.round(Number(amountEl.value || 0) * Number(pctEl.value || 0) / 100);
+    const catEl = formEl.elements.category, payeeEl = formEl.elements.payee;
+    const applEl = document.getElementById("tdsApplicable");
+    const sectionEl = document.getElementById("tdsSection"), fieldsEl = document.getElementById("tdsFields");
+    const syncSection = () => {
+      const show = TDS_CATEGORIES.includes(catEl.value);
+      sectionEl.style.display = show ? "" : "none";
+      fieldsEl.style.display = show && applEl.value === "Applicable" ? "grid" : "none";
+    };
+    catEl.addEventListener("change", syncSection);
+    applEl.addEventListener("change", syncSection);
+    syncSection();
+    const noteEl = document.getElementById("panNote");
+    const applyNoPan = () => {
+      if (noPanEl.checked) panEl.value = "";
+      panEl.disabled = noPanEl.checked;
+      const noPan = noPanEl.checked || !panEl.value.trim();
+      if (noPan && applEl.value === "Applicable") {
+        pctEl.value = "20";
+        tdsAmtEl.value = Math.round(Number(amountEl.value || 0) * 20 / 100);
+        noteEl.textContent = "No PAN entered: 20% is deducted from the base amount.";
+      } else {
+        noteEl.textContent = "";
+        if (pctEl.value !== "" && amountEl.value !== "") tdsAmtEl.value = Math.round(Number(amountEl.value) * Number(pctEl.value) / 100);
+      }
+    };
+    noPanEl.addEventListener("change", applyNoPan);
+    panEl.addEventListener("input", applyNoPan);
+    payeeEl.addEventListener("change", () => {
+      const known = panForPayee(payeeEl.value.trim());
+      if (known && !panEl.disabled && !panEl.value.trim()) panEl.value = known;
     });
+    pctEl.addEventListener("change", applyNoPan);
+    amountEl.addEventListener("input", applyNoPan);
+    applyNoPan();
   }
 
   const catAdd = document.getElementById("catAdd");
@@ -966,21 +1014,22 @@ function bind() {
     };
     const id = editingId || uid();
     const existing = wasEditing ? entries.find(x => x.id === wasEditing) : null;
-    if (f.get("withTds") === "on") {
+    const applicable = f.get("tdsApplicable") === "Applicable" && TDS_CATEGORIES.includes(entry.category);
+    if (applicable) {
       if (amount === null || amount <= 0) { setMsg("Enter the amount before adding TDS.", true); return; }
       if (!entry.payee) { setMsg("Enter who was paid, so the TDS line has a name.", true); return; }
-      const pctRaw = String(f.get("tdsPct") || "").trim();
-      if (pctRaw === "" || !(Number(pctRaw) >= 0)) { setMsg("Enter the TDS %.", true); return; }
-      const noPan = f.get("tdsNoPan") === "on";
-      const pan = String(f.get("tdsPan") || "").trim().toUpperCase();
-      if (!noPan && !pan) { setMsg("Enter the PAN, or tick PAN not available.", true); return; }
+      const panTyped = String(f.get("tdsPan") || "").trim().toUpperCase();
+      const noPan = f.get("tdsNoPan") === "on" || panTyped === "";
+      // Without a PAN the deduction is a flat 20% of the base amount.
+      const pctRaw = noPan ? "20" : String(f.get("tdsPct") || "").trim();
+      if (pctRaw === "" || !(Number(pctRaw) >= 0)) { setMsg("Choose the TDS %.", true); return; }
       const amtRaw = String(f.get("tdsAmt") || "").trim();
-      const tdsAmt = amtRaw === "" ? Math.round(amount * Number(pctRaw) / 100) : Number(amtRaw);
+      const tdsAmt = (noPan || amtRaw === "") ? Math.round(amount * Number(pctRaw) / 100) : Number(amtRaw);
       const tdsId = existing?.tdsId || uid();
       const line = {
         month: (entry.date || "").slice(0, 7),
         vendor: entry.payee,
-        pan: noPan ? "N/A" : pan,
+        pan: noPan ? "N/A" : panTyped,
         section: "",
         gross: amount,
         tds: tdsAmt,
