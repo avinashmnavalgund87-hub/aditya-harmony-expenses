@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Aditya Harmony Monthly Expense</title>
+<title>Aditya Harmony Account Ledger</title>
 <style>
 :root {
   --bg: #f5f6f4; --card: #ffffff; --ink: #1c211e; --muted: #667069; --line: #dfe3dd;
@@ -204,6 +204,11 @@ const monthShort = k => new Date(k + "-01T00:00:00").toLocaleString("en-IN", { m
 const uid = () => Math.random().toString(36).slice(2, 10);
 const byDateDesc = (a, b) => (b.date || "").localeCompare(a.date || "");
 const sum = list => list.reduce((s, e) => s + Number(e.amount || 0), 0);
+// Paid by (credit) entries are money in; everything else is a debit (money out).
+const isCredit = e => !!(e.payer && String(e.payer).trim());
+const debitsOf = list => list.filter(e => !isCredit(e));
+const creditsOf = list => list.filter(isCredit);
+const creditsForMonth = m => sum(creditsOf(entries.filter(e => mkey(e) === m)));
 const amountCell = e => e.amount == null ? '<span class="pending">Pending</span>' : inr(e.amount);
 const colorOf = i => `var(${COLORS[i % COLORS.length]})`;
 const who = e => [e.payee, e.note].filter(Boolean).join(" · ");
@@ -361,7 +366,7 @@ function stopData() {
 // ---------- Views ----------
 // Cash paid out for a month: summed from Daily entries marked Cash. Falls back to the stored figure for imported months with no cash entries.
 function cashPaidOut(m) {
-  const cashRows = entries.filter(e => mkey(e) === m && e.ptype === "Cash");
+  const cashRows = debitsOf(entries.filter(e => mkey(e) === m && e.ptype === "Cash"));
   if (cashRows.length) return cashRows.reduce((s, e) => s + Number(e.amount || 0), 0);
   return bank[m]?.cashOut ?? 0;
 }
@@ -382,14 +387,16 @@ function bankCard(p) {
   const b = bank[p] || {};
   const num = v => (v == null || v === "" ? "" : v);
   const opening = Number(b.opening || 0), nobroker = Number(b.nobroker || 0), other = Number(b.other || 0), interest = Number(b.interest || 0);
-  const credits = nobroker + other + interest;
-  const spent = sum(entries.filter(e => mkey(e) === p));
+  const entryCr = creditsForMonth(p);
+  const credits = nobroker + other + interest + entryCr;
+  const spent = sum(debitsOf(entries.filter(e => mkey(e) === p)));
   const closing = opening + credits - spent;
   const rows = [
     ["Opening Balance", inr(opening)],
     ["NoBroker collections", inr(nobroker)],
     ["Other bank credits", inr(other)],
     ["Bank interest", inr(interest)],
+    ["Credits from Daily entries (Paid by)", inr(entryCr)],
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
@@ -432,11 +439,11 @@ function periodBar(p) {
 function homeView() {
   const p = currentPeriod();
   const now = today();
-  const thisMonth = entries.filter(e => mkey(e) === monthKey(now));
-  const ytd = entries.filter(e => (e.date || "").slice(0, 4) === now.slice(0, 4));
+  const thisMonth = debitsOf(entries.filter(e => mkey(e) === monthKey(now)));
+  const ytd = debitsOf(entries.filter(e => (e.date || "").slice(0, 4) === now.slice(0, 4)));
   const shown = entries.filter(e => inPeriod(e, p));
-  const split = splitByCategory(shown);
-  const total = sum(shown);
+  const split = splitByCategory(debitsOf(shown));
+  const total = sum(debitsOf(shown));
   const pending = entries.filter(e => e.amount == null).length;
 
   let start = 0;
@@ -449,7 +456,7 @@ function homeView() {
   const donut = stops.length ? `conic-gradient(${stops.join(",")})` : "conic-gradient(var(--line) 0 100%)";
 
   const mList = months().slice(-6);
-  const trendMax = Math.max(1, ...mList.map(m => sum(entries.filter(e => mkey(e) === m))));
+  const trendMax = Math.max(1, ...mList.map(m => sum(debitsOf(entries.filter(e => mkey(e) === m)))));
 
   return `
     ${periodBar(p)}
@@ -486,7 +493,7 @@ function homeView() {
         <h2>Last six months</h2>
         <div class="bars">
           ${mList.map(m => {
-            const t = sum(entries.filter(e => mkey(e) === m));
+            const t = sum(debitsOf(entries.filter(e => mkey(e) === m)));
             return `<div class="col ${m === monthKey(now) ? "current" : ""}"><span class="val">${inr(t)}</span><div class="fill" style="height:${(t / trendMax) * 80}%"></div><span class="lbl">${monthShort(m)}</span></div>`;
           }).join("")}
         </div>
@@ -495,7 +502,7 @@ function homeView() {
         <h2>Latest entries</h2>
         ${entries.length ? entries.slice().sort(byDateDesc).slice(0, 6).map(e => `
           <div class="kv" style="align-items:flex-start">
-            <div style="min-width:0"><div>${esc(e.category)}</div><div class="hint" style="margin:0">${esc(e.date) || "Undated"}${e.payee ? " · " + esc(e.payee) : ""}</div></div>
+            <div style="min-width:0"><div>${esc(e.category)}</div><div class="hint" style="margin:0">${esc(e.date) || "Undated"}${e.payer ? " · credit from " + esc(e.payer) : (e.payee ? " · " + esc(e.payee) : "")}</div></div>
             <div class="num">${amountCell(e)}</div>
           </div>`).join("") : '<p class="empty">No entries yet.</p>'}
       </div>
@@ -517,7 +524,8 @@ function entriesView() {
       <form id="form" class="entry-form">
         <label class="field">Date<input type="date" name="date" value="${esc(e0 ? e0.date : today())}"></label>
         <label class="field">Category<select name="category">${categoryList().map(c => `<option ${e0?.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
-        <label class="field">Paid to / by<input type="text" name="payee" list="payees" maxlength="80" value="${esc(e0?.payee || "")}"><datalist id="payees">${PAYEES.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
+        <label class="field">Debit (paid to)<input type="text" name="payee" list="payees" maxlength="80" value="${esc(e0?.payee || "")}"><datalist id="payees">${PAYEES.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
+        <label class="field">Credit (paid by)<input type="text" name="payer" list="payers" maxlength="80" value="${esc(e0?.payer || "")}"></label>
         <label class="field">Amount (₹)<input type="number" name="amount" min="0" step="1" placeholder="Blank if pending" value="${esc(e0?.amount ?? "")}"></label>
         <label class="field">Note<input type="text" name="note" maxlength="120" value="${esc(e0?.note || "")}"></label>
         <label class="field">Payment type<select name="ptype"><option ${e0?.ptype !== "Cash" ? "selected" : ""}>Bank</option><option ${e0?.ptype === "Cash" ? "selected" : ""}>Cash</option></select></label>
@@ -587,11 +595,12 @@ function statementView() {
     const nb = b ? Number(b.nobroker || 0) : null;
     const other = b ? Number(b.other || 0) : null;
     const interest = b ? Number(b.interest || 0) : null;
-    const credits = b ? nb + other + interest : null;
-    const debits = sum(entries.filter(e => mkey(e) === m));
+    const entryCr = creditsForMonth(m);
+    const credits = b ? nb + other + interest + entryCr : (entryCr || null);
+    const debits = sum(debitsOf(entries.filter(e => mkey(e) === m)));
     const closing = b && opening != null ? opening + credits - debits : null;
     prev = closing;
-    return { m, b, opening, nb, other, interest, credits, debits, closing };
+    return { m, b, opening, nb, other, interest, entryCr, credits, debits, closing };
   });
   lastRows = rows;
   const imported = ["2026-07", "2026-08", "2026-09"].some(m => bank[m]);
@@ -629,7 +638,7 @@ function statementView() {
       </table></div>
     </div>`;
   const emM = ms.includes(expMonth) ? expMonth : ms[ms.length - 1];
-  const emEntries = entries.filter(e => mkey(e) === emM);
+  const emEntries = debitsOf(entries.filter(e => mkey(e) === emM));
   const emTotal = sum(emEntries);
   const emFlats = bank[emM]?.flats;
   const expCard = `
@@ -744,6 +753,7 @@ function monthCsv(m) {
     row(["NoBroker collections", num(r?.nb)]),
     row(["Other bank credits", num(r?.other)]),
     row(["Bank interest", num(r?.interest)]),
+    row(["Credits from Daily entries (Paid by)", num(r?.entryCr)]),
     row(["Total credits", num(r?.credits)]),
     row(["Expenditure (debits)", r ? r.debits : 0]),
     row(["Closing balance", num(r?.closing)]),
@@ -1123,7 +1133,7 @@ function saveBytes(bytes, name, type) {
 function monthXlsx(m) {
   const b = bank[m] || {};
   const r = lastRows.find(x => x.m === m);
-  const rowsM = entries.filter(e => mkey(e) === m).sort((a, c) => (a.date || "").localeCompare(c.date || ""));
+  const rowsM = debitsOf(entries.filter(e => mkey(e) === m)).sort((a, c) => (a.date || "").localeCompare(c.date || ""));
   const [y, mo] = m.split("-").map(Number);
   const endLabel = `${new Date(y, mo, 0).getDate()}.${mo}.${y}`;
   const catMap = {};
@@ -1167,8 +1177,8 @@ function bind() {
     const cb = document.getElementById("closingBank");
     const recalc = () => {
       const v = k => Number(bankForm.elements[k]?.value || 0);
-      const credits = v("nobroker") + v("other") + v("interest");
-      const spentNow = sum(entries.filter(e => mkey(e) === bankForm.dataset.month));
+      const credits = v("nobroker") + v("other") + v("interest") + creditsForMonth(bankForm.dataset.month);
+      const spentNow = sum(debitsOf(entries.filter(e => mkey(e) === bankForm.dataset.month)));
       cb.value = inr(v("opening") + credits - spentNow);
     };
     ["opening", "nobroker", "other", "interest"].forEach(k => bankForm.elements[k]?.addEventListener("input", recalc));
@@ -1262,11 +1272,13 @@ function bind() {
     const raw = String(f.get("amount") || "").trim();
     const amount = raw === "" ? null : Number(raw);
     if (amount !== null && !(amount >= 0)) { setMsg("Enter a valid amount, or leave it blank.", true); return; }
+    if (!String(f.get("payee") || "").trim() && !String(f.get("payer") || "").trim()) { setMsg("Enter Debit (paid to) for a payment, or Credit (paid by) for money received.", true); return; }
     const wasEditing = editingId;
     const entry = {
       date: String(f.get("date") || ""),
       category: String(f.get("category")),
       payee: String(f.get("payee") || "").trim(),
+      payer: String(f.get("payer") || "").trim(),
       amount,
       note: String(f.get("note") || "").trim(),
       ptype: String(f.get("ptype") || "Bank")
