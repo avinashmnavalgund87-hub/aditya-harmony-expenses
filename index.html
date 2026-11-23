@@ -400,7 +400,7 @@ function bankCard(p) {
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
-    ["Cash given to the Association Member (number of flats)", b.flats ?? "—"]
+    ["Unique flats paying through NoBroker", b.flats ?? "—"]
   ];
   return `
     <div class="card">
@@ -410,7 +410,9 @@ function bankCard(p) {
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
         <label class="field">Bank interest (₹)<input type="number" name="interest" min="0" step="1" value="${esc(num(b.interest))}"></label>
-        <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
+        <label class="field">Total bank credits (₹)<input type="text" id="totalCredits" readonly value="${inr(credits)}" style="opacity:0.85"></label>
+        <label class="field">Total bank expenditure (₹)<input type="text" id="totalSpent" readonly value="${inr(spent)}" style="opacity:0.85"></label>
+        <label class="field">Unique flats paying through NoBroker<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
         <label class="field">Maintenance amount as Cash Payment (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
         <label class="field">Closing bank balance (₹)<input type="text" id="closingBank" readonly value="${inr(closing)}" style="opacity:0.85"></label>
@@ -1175,10 +1177,14 @@ function bind() {
   const bankForm = document.getElementById("bankForm");
   if (bankForm) {
     const cb = document.getElementById("closingBank");
+    const tc = document.getElementById("totalCredits");
+    const ts = document.getElementById("totalSpent");
     const recalc = () => {
       const v = k => Number(bankForm.elements[k]?.value || 0);
       const credits = v("nobroker") + v("other") + v("interest") + creditsForMonth(bankForm.dataset.month);
       const spentNow = sum(debitsOf(entries.filter(e => mkey(e) === bankForm.dataset.month)));
+      tc.value = inr(credits);
+      ts.value = inr(spentNow);
       cb.value = inr(v("opening") + credits - spentNow);
     };
     ["opening", "nobroker", "other", "interest"].forEach(k => bankForm.elements[k]?.addEventListener("input", recalc));
