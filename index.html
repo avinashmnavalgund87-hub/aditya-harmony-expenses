@@ -388,19 +388,17 @@ function bankCard(p) {
   const num = v => (v == null || v === "" ? "" : v);
   const opening = Number(b.opening || 0), nobroker = Number(b.nobroker || 0), other = Number(b.other || 0), interest = Number(b.interest || 0);
   const entryCr = creditsForMonth(p);
-  const credits = nobroker + other + interest + entryCr;
+  const credits = nobroker + other + interest;
   const spent = sum(debitsOf(entries.filter(e => mkey(e) === p)));
-  const closing = opening + nobroker + other + interest - spent;
+  const closing = opening + credits - spent;
   const rows = [
     ["Opening Balance", inr(opening)],
     ["NoBroker collections", inr(nobroker)],
     ["Other bank credits", inr(other)],
-    ["Bank interest", inr(interest)],
-    ["Credits from Daily entries (Paid by)", inr(entryCr)],
+    ["Bank Interest", inr(interest)],
     ["Total bank credits", inr(credits)],
     ["Monthly Expenditure", inr(spent)],
-    ["Closing bank balance", inr(closing)],
-    ["Unique flats paying through NoBroker", b.flats ?? "—"]
+    ["Closing bank balance", inr(closing)]
   ];
   return `
     <div class="card">
@@ -1181,11 +1179,11 @@ function bind() {
     const ts = document.getElementById("totalSpent");
     const recalc = () => {
       const v = k => Number(bankForm.elements[k]?.value || 0);
-      const credits = v("nobroker") + v("other") + v("interest") + creditsForMonth(bankForm.dataset.month);
+      const credits = v("nobroker") + v("other") + v("interest");
       const spentNow = sum(debitsOf(entries.filter(e => mkey(e) === bankForm.dataset.month)));
       tc.value = inr(credits);
       ts.value = inr(spentNow);
-      cb.value = inr(v("opening") + v("nobroker") + v("other") + v("interest") - spentNow);
+      cb.value = inr(v("opening") + credits - spentNow);
     };
     ["opening", "nobroker", "other", "interest"].forEach(k => bankForm.elements[k]?.addEventListener("input", recalc));
   }
