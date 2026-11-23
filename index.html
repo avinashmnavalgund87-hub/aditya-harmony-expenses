@@ -398,14 +398,15 @@ function bankCard(p) {
   return `
     <div class="card">
       <h2>Bank summary: ${monthLabel(p)}</h2>
-      ${canWrite ? `<form id="bankForm" class="entry-form">
+      ${canWrite ? `<form id="bankForm" class="entry-form" data-month="${p}">
         <label class="field">Opening balance (₹)<input type="number" name="opening" step="1" value="${esc(num(b.opening))}"></label>
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
         <label class="field">Bank interest (₹)<input type="number" name="interest" min="0" step="1" value="${esc(num(b.interest))}"></label>
         <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
-        <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
+        <label class="field">Maintenance amount as Cash Payment (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
+        <label class="field">Closing bank balance (₹)<input type="text" id="closingBank" readonly value="${inr(closing)}" style="opacity:0.85"></label>
         <label class="field" style="grid-column:1/-1">Fixed deposits (one per line: name, amount)<textarea name="fds" rows="3">${esc((b.fds || []).map(f => `${f.name}, ${f.amount}`).join("\n"))}</textarea></label>
         <label class="field">Imprest holder<input type="text" name="impHolder" maxlength="60" value="${esc(b.impHolder || "")}"></label>
         <label class="field">Imprest opening cash (₹)<input type="number" name="impOpen" min="0" step="1" value="${esc(num(b.impOpen))}"></label>
@@ -690,7 +691,7 @@ function statementView() {
     <div class="card">
       <h2>Cash</h2>
       ${withCash.length ? `<div class="tablewrap"><table>
-        <thead><tr><th>Month</th><th style="text-align:right">Cash given to the Association Member (number of flats)</th><th style="text-align:right">Cash paid out</th></tr></thead>
+        <thead><tr><th>Month</th><th style="text-align:right">Maintenance amount as Cash Payment</th><th style="text-align:right">Cash paid out</th></tr></thead>
         <tbody>${withCash.map(r => `<tr><td>${monthLabel(r.m)}</td><td class="num">${fmtOr(r.b.cashIn)}</td><td class="num">${fmtOr(cashPaidOut(r.m))}</td></tr>`).join("")}</tbody>
       </table></div>` : '<p class="empty">No cash figures yet.</p>'}
       <p class="hint">Cash is kept apart from the bank balance. Cash in includes cash withdrawn from the bank.</p>
@@ -747,7 +748,7 @@ function monthCsv(m) {
     row(["Expenditure (debits)", r ? r.debits : 0]),
     row(["Closing balance", num(r?.closing)]),
     "",
-    row(["Cash given to the Association Member (number of flats)", num(r?.b?.cashIn)]),
+    row(["Maintenance amount as Cash Payment", num(r?.b?.cashIn)]),
     row(["Cash in hand (month end)", num(r?.b?.cashHand)]),
     row(["Imprest holder", r?.b?.impHolder || ""]),
     row(["Imprest opening cash", num(r?.b?.impOpen)]),
@@ -1161,6 +1162,17 @@ function render() {
 }
 
 function bind() {
+  const bankForm = document.getElementById("bankForm");
+  if (bankForm) {
+    const cb = document.getElementById("closingBank");
+    const recalc = () => {
+      const v = k => Number(bankForm.elements[k]?.value || 0);
+      const credits = v("nobroker") + v("other") + v("interest");
+      const spentNow = sum(entries.filter(e => mkey(e) === bankForm.dataset.month));
+      cb.value = inr(v("opening") + credits - spentNow);
+    };
+    ["opening", "nobroker", "other", "interest"].forEach(k => bankForm.elements[k]?.addEventListener("input", recalc));
+  }
   const formEl = document.getElementById("form");
   if (formEl && formEl.elements.tdsPct) {
     const noPanEl = document.getElementById("tdsNoPan");
