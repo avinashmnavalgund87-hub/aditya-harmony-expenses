@@ -390,7 +390,7 @@ function bankCard(p) {
   const entryCr = creditsForMonth(p);
   const credits = nobroker + other + interest + entryCr;
   const spent = sum(debitsOf(entries.filter(e => mkey(e) === p)));
-  const closing = opening + credits - spent;
+  const closing = opening + nobroker + other + interest - spent;
   const rows = [
     ["Opening Balance", inr(opening)],
     ["NoBroker collections", inr(nobroker)],
@@ -398,7 +398,7 @@ function bankCard(p) {
     ["Bank interest", inr(interest)],
     ["Credits from Daily entries (Paid by)", inr(entryCr)],
     ["Total bank credits", inr(credits)],
-    ["Total bank expenditure", inr(spent)],
+    ["Monthly Expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
     ["Unique flats paying through NoBroker", b.flats ?? "—"]
   ];
@@ -411,7 +411,7 @@ function bankCard(p) {
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
         <label class="field">Bank interest (₹)<input type="number" name="interest" min="0" step="1" value="${esc(num(b.interest))}"></label>
         <label class="field">Total bank credits (₹)<input type="text" id="totalCredits" readonly value="${inr(credits)}" style="opacity:0.85"></label>
-        <label class="field">Total bank expenditure (₹)<input type="text" id="totalSpent" readonly value="${inr(spent)}" style="opacity:0.85"></label>
+        <label class="field">Monthly Expenditure (₹)<input type="text" id="totalSpent" readonly value="${inr(spent)}" style="opacity:0.85"></label>
         <label class="field">Unique flats paying through NoBroker<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
         <label class="field">Maintenance amount as Cash Payment (₹)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
@@ -426,7 +426,7 @@ function bankCard(p) {
       <div style="margin-top:14px">
         ${rows.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span class="num">${v}</span></div>`).join("")}
       </div>
-      <p class="hint">Total bank expenditure adds up this month's entries with amounts. Cash payments are included too, so check before relying on the closing balance.</p>
+      <p class="hint">Monthly Expenditure is this month's debits (bank and cash) from the Daily entries with amounts. Closing bank balance = Opening + NoBroker + Other bank credits + Bank interest − Monthly Expenditure.</p>
     </div>`;
 }
 
@@ -1185,7 +1185,7 @@ function bind() {
       const spentNow = sum(debitsOf(entries.filter(e => mkey(e) === bankForm.dataset.month)));
       tc.value = inr(credits);
       ts.value = inr(spentNow);
-      cb.value = inr(v("opening") + credits - spentNow);
+      cb.value = inr(v("opening") + v("nobroker") + v("other") + v("interest") - spentNow);
     };
     ["opening", "nobroker", "other", "interest"].forEach(k => bankForm.elements[k]?.addEventListener("input", recalc));
   }
