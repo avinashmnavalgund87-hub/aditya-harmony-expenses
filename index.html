@@ -381,14 +381,15 @@ function bankCard(p) {
   if (p === "undated") return '<div class="card"><h2>Bank summary</h2><p class="empty">Choose a month above to enter its bank figures.</p></div>';
   const b = bank[p] || {};
   const num = v => (v == null || v === "" ? "" : v);
-  const opening = Number(b.opening || 0), nobroker = Number(b.nobroker || 0), other = Number(b.other || 0);
-  const credits = nobroker + other;
+  const opening = Number(b.opening || 0), nobroker = Number(b.nobroker || 0), other = Number(b.other || 0), interest = Number(b.interest || 0);
+  const credits = nobroker + other + interest;
   const spent = sum(entries.filter(e => mkey(e) === p));
   const closing = opening + credits - spent;
   const rows = [
     ["Opening Balance", inr(opening)],
     ["NoBroker collections", inr(nobroker)],
     ["Other bank credits", inr(other)],
+    ["Bank interest", inr(interest)],
     ["Total bank credits", inr(credits)],
     ["Total bank expenditure", inr(spent)],
     ["Closing bank balance", inr(closing)],
@@ -401,6 +402,7 @@ function bankCard(p) {
         <label class="field">Opening balance (₹)<input type="number" name="opening" step="1" value="${esc(num(b.opening))}"></label>
         <label class="field">NoBroker collections (₹)<input type="number" name="nobroker" min="0" step="1" value="${esc(num(b.nobroker))}"></label>
         <label class="field">Other bank credits (₹)<input type="number" name="other" min="0" step="1" value="${esc(num(b.other))}"></label>
+        <label class="field">Bank interest (₹)<input type="number" name="interest" min="0" step="1" value="${esc(num(b.interest))}"></label>
         <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="flats" min="0" step="1" value="${esc(num(b.flats))}"></label>
         <label class="field">Cash given to the Association Member (number of flats)<input type="number" name="cashIn" min="0" step="1" value="${esc(num(b.cashIn))}"></label>
         <label class="field">Cash in hand, month end (₹)<input type="number" name="cashHand" min="0" step="1" value="${esc(num(b.cashHand))}"></label>
@@ -583,11 +585,12 @@ function statementView() {
     const opening = b && b.opening != null ? Number(b.opening) : prev;
     const nb = b ? Number(b.nobroker || 0) : null;
     const other = b ? Number(b.other || 0) : null;
-    const credits = b ? nb + other : null;
+    const interest = b ? Number(b.interest || 0) : null;
+    const credits = b ? nb + other + interest : null;
     const debits = sum(entries.filter(e => mkey(e) === m));
     const closing = b && opening != null ? opening + credits - debits : null;
     prev = closing;
-    return { m, b, opening, nb, other, credits, debits, closing };
+    return { m, b, opening, nb, other, interest, credits, debits, closing };
   });
   lastRows = rows;
   const imported = ["2026-07", "2026-08", "2026-09"].some(m => bank[m]);
@@ -739,6 +742,7 @@ function monthCsv(m) {
     row(["Opening balance", num(r?.opening)]),
     row(["NoBroker collections", num(r?.nb)]),
     row(["Other bank credits", num(r?.other)]),
+    row(["Bank interest", num(r?.interest)]),
     row(["Total credits", num(r?.credits)]),
     row(["Expenditure (debits)", r ? r.debits : 0]),
     row(["Closing balance", num(r?.closing)]),
@@ -1236,7 +1240,7 @@ function bind() {
     const f = new FormData(bf);
     const p = currentPeriod();
     const n = k => { const v = String(f.get(k) || "").trim(); return v === "" ? null : Number(v); };
-    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), flats: n("flats"), cashIn: n("cashIn"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
+    await write(setDoc(doc(db, "bank", p), { opening: n("opening"), nobroker: n("nobroker"), other: n("other"), interest: n("interest"), flats: n("flats"), cashIn: n("cashIn"), cashHand: n("cashHand"), fds: parseFds(String(f.get("fds") || "")), impHolder: String(f.get("impHolder") || "").trim(), impOpen: n("impOpen"), impRec: parseImp(String(f.get("impRec") || "")), impPay: parseImp(String(f.get("impPay") || "")) }), "Bank figures saved.");
   });
 
   const form = document.getElementById("form");
