@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Aditya Harmony Account Ledger</title>
+<title>Aditya Harmony Account Ledger 2026-27</title>
 <style>
 :root {
   --bg: #eef3f0; --card: #ffffff; --ink: #14201a; --muted: #5d6b63; --line: #e1e8e3;
@@ -12,14 +12,6 @@
   --shadow: 0 1px 2px rgba(20,32,26,.05), 0 6px 18px rgba(20,32,26,.06);
   --c1: #1f6f55; --c2: #e0963f; --c3: #3f7fb5; --c4: #a24f7a; --c5: #7a8f2e; --c6: #5b5fb8; --c7: #c4553d; --c8: #3c9a9a; --c9: #8a6a4a; --c10: #6d7a86; --c11: #b58f1f; --c12: #4f8a5f;
   color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0d1411; --card: #151d19; --ink: #e9f1ec; --muted: #94a59b; --line: #26322c;
-    --accent: #6fd1a8; --accent-2: #8fe0bd; --danger: #ef8a79; --warn: #e8b865; color-scheme: dark;
-    --hero: linear-gradient(135deg, #14392c 0%, #1d5a46 60%, #2a7a60 100%);
-    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 22px rgba(0,0,0,.35);
-  }
 }
 :root[data-theme="dark"] {
   --bg: #0d1411; --card: #151d19; --ink: #e9f1ec; --muted: #94a59b; --line: #26322c;
@@ -120,6 +112,50 @@ td .note { color: var(--muted); font-size: 13px; }
 .status.err { color: var(--danger); }
 .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
 [hidden] { display: none !important; }
+
+/* ---- Professional look: animated live background ---- */
+html { background: #0c2a26; }
+body { position: relative; min-height: 100vh; background: #0c2a26; overflow-x: hidden; }
+body::before {
+  content: ""; position: fixed; inset: -25%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(38% 38% at 18% 28%, rgba(46,139,110,.9) 0%, transparent 70%),
+    radial-gradient(34% 34% at 82% 18%, rgba(63,127,181,.75) 0%, transparent 70%),
+    radial-gradient(42% 42% at 74% 84%, rgba(224,150,63,.5) 0%, transparent 70%),
+    radial-gradient(38% 38% at 14% 88%, rgba(31,111,85,.85) 0%, transparent 70%),
+    radial-gradient(30% 30% at 50% 50%, rgba(143,224,189,.35) 0%, transparent 70%);
+  filter: blur(48px) saturate(125%);
+  animation: wallpaper-drift 28s ease-in-out infinite alternate, wallpaper-hue 60s linear infinite;
+}
+@keyframes wallpaper-drift {
+  0%   { transform: translate3d(0,0,0) scale(1) rotate(0deg); }
+  50%  { transform: translate3d(4%,-3%,0) scale(1.08) rotate(5deg); }
+  100% { transform: translate3d(-4%,4%,0) scale(1.03) rotate(-4deg); }
+}
+@keyframes wallpaper-hue {
+  0%   { filter: blur(48px) saturate(125%) hue-rotate(0deg); }
+  50%  { filter: blur(48px) saturate(135%) hue-rotate(40deg); }
+  100% { filter: blur(48px) saturate(125%) hue-rotate(0deg); }
+}
+.wrap { position: relative; padding-top: 16px; }
+header.top {
+  background: linear-gradient(120deg, rgba(12,42,38,.92), rgba(31,111,85,.92) 55%, rgba(46,139,110,.88));
+  backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.14);
+  margin: 0 0 22px; border-radius: 18px; padding: 22px 26px;
+}
+.card, .kpi {
+  background: rgba(255,255,255,.93); backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-color: rgba(255,255,255,.6); box-shadow: 0 10px 30px rgba(0,0,0,.18);
+}
+.card { border-radius: 18px; }
+.kpi { border-radius: 18px; }
+h1, h2 { color: var(--ink); }
+header.top h1 { color: #fff; }
+.status { text-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
