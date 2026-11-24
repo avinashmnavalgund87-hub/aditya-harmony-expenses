@@ -117,15 +117,15 @@ td .note { color: var(--muted); font-size: 13px; }
 html { background: #0c2a26; }
 body { position: relative; min-height: 100vh; background: #0c2a26; overflow-x: hidden; }
 body::before {
-  content: ""; position: fixed; inset: -25%; z-index: -1; pointer-events: none;
+  content: ""; position: fixed; inset: -10%; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(38% 38% at 18% 28%, rgba(46,139,110,.9) 0%, transparent 70%),
-    radial-gradient(34% 34% at 82% 18%, rgba(63,127,181,.75) 0%, transparent 70%),
-    radial-gradient(42% 42% at 74% 84%, rgba(224,150,63,.5) 0%, transparent 70%),
-    radial-gradient(38% 38% at 14% 88%, rgba(31,111,85,.85) 0%, transparent 70%),
+    radial-gradient(55% 55% at 15% 25%, rgba(46,160,120,1) 0%, transparent 65%),
+    radial-gradient(50% 50% at 90% 15%, rgba(70,150,230,1) 0%, transparent 65%),
+    radial-gradient(50% 50% at 80% 90%, rgba(245,170,70,.95) 0%, transparent 65%),
+    radial-gradient(50% 50% at 10% 90%, rgba(40,190,140,.9) 0%, transparent 65%),
     radial-gradient(30% 30% at 50% 50%, rgba(143,224,189,.35) 0%, transparent 70%);
-  filter: blur(48px) saturate(125%);
-  animation: wallpaper-drift 28s ease-in-out infinite alternate, wallpaper-hue 60s linear infinite;
+  filter: blur(40px) saturate(140%);
+  animation: wallpaper-drift 20s ease-in-out infinite alternate, wallpaper-hue 60s linear infinite;
 }
 @keyframes wallpaper-drift {
   0%   { transform: translate3d(0,0,0) scale(1) rotate(0deg); }
@@ -133,9 +133,9 @@ body::before {
   100% { transform: translate3d(-4%,4%,0) scale(1.03) rotate(-4deg); }
 }
 @keyframes wallpaper-hue {
-  0%   { filter: blur(48px) saturate(125%) hue-rotate(0deg); }
-  50%  { filter: blur(48px) saturate(135%) hue-rotate(40deg); }
-  100% { filter: blur(48px) saturate(125%) hue-rotate(0deg); }
+  0%   { filter: blur(40px) saturate(140%) hue-rotate(0deg); }
+  50%  { filter: blur(40px) saturate(150%) hue-rotate(60deg); }
+  100% { filter: blur(40px) saturate(140%) hue-rotate(0deg); }
 }
 .wrap { position: relative; padding-top: 16px; }
 header.top {
@@ -144,8 +144,8 @@ header.top {
   margin: 0 0 22px; border-radius: 18px; padding: 22px 26px;
 }
 .card, .kpi {
-  background: rgba(255,255,255,.93); backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: rgba(255,255,255,.80); backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
   border-color: rgba(255,255,255,.6); box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
 .card { border-radius: 18px; }
