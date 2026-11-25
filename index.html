@@ -861,6 +861,14 @@ function monthCsv(m) {
   entries.filter(e => mkey(e) === m)
     .sort((a, b) => a.category.localeCompare(b.category))
     .forEach(e => lines.push(row([e.date, e.category, e.payee, e.note, e.amount ?? "Pending"])));
+  const mt = tds.filter(t => t.month === m).sort((a, b) => (a.vendor || "").localeCompare(b.vendor || ""));
+  lines.push("");
+  lines.push(row(["TDS deducted"]));
+  lines.push(row(["Vendor", "PAN", "Section", "Gross (INR)", "TDS %", "TDS deducted (INR)", "Net payment (INR)"]));
+  mt.forEach(t => lines.push(row([t.vendor, t.pan, t.section, t.gross, t.tdsPct != null ? t.tdsPct + "%" : "", t.tds, Number(t.gross || 0) - Number(t.tds || 0)])));
+  const tdsG = mt.reduce((x, t) => x + Number(t.gross || 0), 0), tdsT = mt.reduce((x, t) => x + Number(t.tds || 0), 0);
+  lines.push(row(["Total", "", "", tdsG, "", tdsT, tdsG - tdsT]));
+  lines.push(row(["TDS paid to Sandesh", tdsPay[m] ? Number(tdsPay[m].paid || 0) : "Not paid", "Date paid", tdsPay[m]?.date || ""]));
   saveText(`aditya-harmony-${m}.csv`, lines.join("\r\n"));
 }
 
@@ -1067,8 +1075,10 @@ const XLW = (() => {
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
-  function barChart(title, sheet, catRange, valRange, names, values, horizontal) {
+  const CHART_PALETTE = ["2F6FDB", "F0A03C", "2BA37A", "D1553D", "8E5BB5", "3C9A9A", "B5A21E", "5B6BB8", "A24F7A", "6D7A86", "4F8A5F", "E07A9A"];
+  function barChart(title, sheet, catRange, valRange, names, values, horizontal, colored) {
     const n = names.length;
+    const dPts = colored ? values.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${CHART_PALETTE[i % CHART_PALETTE.length]}"/></a:solidFill></c:spPr></c:dPt>`).join("") : "";
     const catPts = names.map((x, i) => `<c:pt idx="${i}"><c:v>${esc(x)}</c:v></c:pt>`).join("");
     const valPts = values.map((x, i) => `<c:pt idx="${i}"><c:v>${x}</c:v></c:pt>`).join("");
     const dir = horizontal ? "bar" : "col";
@@ -1082,7 +1092,7 @@ const XLW = (() => {
 <c:barChart><c:barDir val="${dir}"/><c:grouping val="clustered"/><c:varyColors val="0"/>
 <c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>Amount in INR</c:v></c:tx>
 <c:spPr><a:solidFill><a:srgbClr val="2F6FDB"/></a:solidFill></c:spPr>
-<c:invertIfNegative val="0"/>
+<c:invertIfNegative val="0"/>${dPts}
 <c:dLbls><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>
 <c:cat><c:strRef><c:f>${catRange}</c:f><c:strCache><c:ptCount val="${n}"/>${catPts}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>${valRange}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${valPts}</c:numCache></c:numRef></c:val>
@@ -1092,6 +1102,33 @@ const XLW = (() => {
 <c:catAx><c:axId val="111"/><c:scaling><c:orientation val="${horizontal ? "maxMin" : "minMax"}"/></c:scaling><c:delete val="0"/><c:axPos val="${horizontal ? "l" : "b"}"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="222"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>
 <c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${horizontal ? "b" : "l"}"/><c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="111"/><c:crosses val="${horizontal ? "max" : "autoZero"}"/><c:crossBetween val="between"/></c:valAx>
 </c:plotArea>
+<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>
+</c:chart>
+</c:chartSpace>`;
+  }
+
+  function doughnutChart(title, catRange, valRange, names, values) {
+    const n = names.length;
+    const catPts = names.map((x, i) => `<c:pt idx="${i}"><c:v>${esc(x)}</c:v></c:pt>`).join("");
+    const valPts = values.map((x, i) => `<c:pt idx="${i}"><c:v>${x}</c:v></c:pt>`).join("");
+    const dPts = values.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${CHART_PALETTE[i % CHART_PALETTE.length]}"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("");
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<c:roundedCorners val="0"/>
+<c:chart>
+<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1200" b="1"/></a:pPr><a:r><a:rPr lang="en-IN" sz="1200" b="1"/><a:t>${esc(title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>
+<c:autoTitleDeleted val="0"/>
+<c:plotArea><c:layout/>
+<c:doughnutChart><c:varyColors val="1"/>
+<c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>Amount in INR</c:v></c:tx>${dPts}
+<c:dLbls><c:numFmt formatCode="0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>
+<c:cat><c:strRef><c:f>${catRange}</c:f><c:strCache><c:ptCount val="${n}"/>${catPts}</c:strCache></c:strRef></c:cat>
+<c:val><c:numRef><c:f>${valRange}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${valPts}</c:numCache></c:numRef></c:val>
+</c:ser>
+<c:firstSliceAng val="0"/><c:holeSize val="55"/>
+</c:doughnutChart>
+</c:plotArea>
+<c:legend><c:legendPos val="r"/><c:overlay val="0"/></c:legend>
 <c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>
 </c:chart>
 </c:chartSpace>`;
@@ -1132,6 +1169,18 @@ function buildStatementXlsx(d) {
   put([{ v: "", s: TOTL }, { v: "", s: TOTL }, { v: `Total Expenditures paid (Sl No 1 to Sl No ${d.expenses.length})`, s: TOTL }, { v: expTotal, s: TOTN }]);
   put([{ v: "", s: TXT }, { v: "", s: TXT }, { v: "No of Flats occupied", s: TXT }, { v: d.flats ?? "—", s: NUM }]);
   blank();
+  if (d.tds && d.tds.length) {
+    put([{ v: "TDS deducted for the month", s: SEC }], "D");
+    header(["Sl. No", "Vendor", "Section / PAN / rate / net", "TDS deducted"]);
+    d.tds.forEach((t, i) => put([
+      { v: i + 1, s: TXT }, { v: t.vendor, s: TXT },
+      { v: `Sec ${t.section || "-"} | PAN ${t.pan || "N/A"} | ${t.tdsPct ?? ""}% on gross ${t.gross} | Net payment ${t.gross - t.tds}`, s: TXT },
+      { v: t.tds, s: NUM }
+    ]));
+    put([{ v: "", s: TOTL }, { v: "", s: TOTL }, { v: "Total TDS deducted", s: TOTL }, { v: sum(d.tds.map(t => t.tds)), s: TOTN }]);
+    put([{ v: "", s: TXT }, { v: "", s: TXT }, { v: "TDS paid to Sandesh", s: TXT }, d.tdsPaid == null ? { v: "Not paid", s: TXT } : { v: d.tdsPaid, s: NUM }]);
+    blank();
+  }
 
   put([{ v: `B) Statement Reconciliation of Closing Balance of Cash and bank balance as on ${d.endLabel}`, s: SEC }], "D");
   header(["Sl. No", "Type of payment", "Particulars", "Amount in INR"]);
@@ -1202,17 +1251,20 @@ function buildStatementXlsx(d) {
   const cbXml = XLW.sheetXml(cb, { cols: [8, 14, 58, 14, 14], merges: cbMerges });
 
   // ----- charts -----
-  const chart1 = XLW.barChart("Expenditure by category: " + d.monthName, "summary",
+  const chart1 = XLW.doughnutChart("Expenditure by category: " + d.monthName,
     `'summary'!$O$4:$O$${catEnd}`, `'summary'!$P$4:$P$${catEnd}`,
-    cats.map(c => c.name), cats.map(c => c.value), true);
-  const chart2 = XLW.barChart("Monthly expenditure (last months)", "summary",
+    cats.map(c => c.name), cats.map(c => c.value));
+  const chart2 = XLW.barChart("Expenditure by category (bars)", "summary",
+    `'summary'!$O$4:$O$${catEnd}`, `'summary'!$P$4:$P$${catEnd}`,
+    cats.map(c => c.name), cats.map(c => c.value), true, true);
+  const chart3 = XLW.barChart("Monthly expenditure variation", "summary",
     `'summary'!$O$${tFirst}:$O$${tLast}`, `'summary'!$P$${tFirst}:$P$${tLast}`,
-    trend.map(t => t.name), trend.map(t => t.value), false);
-  const drawing = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${XLW.anchor([5, 2], [13, 24], "rId1", 2, "Category chart")}${XLW.anchor([5, 26], [13, 46], "rId2", 3, "Trend chart")}</xdr:wsDr>`;
+    trend.map(t => t.name), trend.map(t => t.value), false, true);
+  const drawing = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${XLW.anchor([5, 2], [13, 24], "rId1", 2, "Category doughnut")}${XLW.anchor([5, 26], [13, 46], "rId2", 3, "Category bars")}${XLW.anchor([5, 48], [13, 68], "rId3", 4, "Monthly variation")}</xdr:wsDr>`;
 
   const CT = "application/vnd.openxmlformats-officedocument";
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="${CT}.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="${CT}.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="${CT}.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="${CT}.spreadsheetml.styles+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="${CT}.drawing+xml"/><Override PartName="/xl/charts/chart1.xml" ContentType="${CT}.drawingml.chart+xml"/><Override PartName="/xl/charts/chart2.xml" ContentType="${CT}.drawingml.chart+xml"/></Types>`;
-  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="summary" sheetId="1" r:id="rId1"/><sheet name="cash book" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">summary!$A$1:$N$47</definedName></definedNames></workbook>`;
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="${CT}.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="${CT}.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="${CT}.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="${CT}.spreadsheetml.styles+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="${CT}.drawing+xml"/><Override PartName="/xl/charts/chart1.xml" ContentType="${CT}.drawingml.chart+xml"/><Override PartName="/xl/charts/chart2.xml" ContentType="${CT}.drawingml.chart+xml"/><Override PartName="/xl/charts/chart3.xml" ContentType="${CT}.drawingml.chart+xml"/></Types>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="summary" sheetId="1" r:id="rId1"/><sheet name="cash book" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">summary!$A$1:$N$69</definedName></definedNames></workbook>`;
 
   return XLW.zip([
     { name: "[Content_Types].xml", data: new TextEncoder().encode(contentTypes) },
@@ -1224,9 +1276,10 @@ function buildStatementXlsx(d) {
     { name: "xl/worksheets/_rels/sheet1.xml.rels", data: new TextEncoder().encode(XLW.rels([["rId1", "drawing", "../drawings/drawing1.xml"]])) },
     { name: "xl/worksheets/sheet2.xml", data: new TextEncoder().encode(cbXml) },
     { name: "xl/drawings/drawing1.xml", data: new TextEncoder().encode(drawing) },
-    { name: "xl/drawings/_rels/drawing1.xml.rels", data: new TextEncoder().encode(XLW.rels([["rId1", "chart", "../charts/chart1.xml"], ["rId2", "chart", "../charts/chart2.xml"]])) },
+    { name: "xl/drawings/_rels/drawing1.xml.rels", data: new TextEncoder().encode(XLW.rels([["rId1", "chart", "../charts/chart1.xml"], ["rId2", "chart", "../charts/chart2.xml"], ["rId3", "chart", "../charts/chart3.xml"]])) },
     { name: "xl/charts/chart1.xml", data: new TextEncoder().encode(chart1) },
-    { name: "xl/charts/chart2.xml", data: new TextEncoder().encode(chart2) }
+    { name: "xl/charts/chart2.xml", data: new TextEncoder().encode(chart2) },
+    { name: "xl/charts/chart3.xml", data: new TextEncoder().encode(chart3) }
   ]);
 }
 
@@ -1266,7 +1319,9 @@ function monthXlsx(m) {
     holder: b.impHolder || "Cash holder",
     imprestOpening: b.impOpen ?? 0,
     receipts: b.impRec || [],
-    payments: b.impPay || []
+    payments: b.impPay || [],
+    tds: tds.filter(t => t.month === m).sort((a, c) => (a.vendor || "").localeCompare(c.vendor || "")).map(t => ({ vendor: t.vendor || "", pan: t.pan || "", section: t.section || "", gross: Number(t.gross || 0), tdsPct: t.tdsPct, tds: Number(t.tds || 0) })),
+    tdsPaid: tdsPay[m] ? Number(tdsPay[m].paid || 0) : null
   });
   saveBytes(bytes, `aditya-harmony-${m}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
