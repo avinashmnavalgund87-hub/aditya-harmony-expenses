@@ -1140,7 +1140,7 @@ const XLW = (() => {
   const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
   const rels = list => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${list.map(([id, type, target]) => `<Relationship Id="${id}" Type="${REL}/${type}" Target="${target}"/>`).join("")}</Relationships>`;
 
-  return { zip, sheetXml, STYLES, barChart, anchor, rels, colName, esc };
+  return { zip, sheetXml, STYLES, barChart, doughnutChart, anchor, rels, colName, esc };
 })();
 
 // d = { title, monthName, endLabel, expenses:[{type,particulars,amount}], flats, cashInHand, bankClose,
